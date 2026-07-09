@@ -1,0 +1,312 @@
+import { useEffect, useRef, useState } from 'react';
+import { api, setToken } from '../lib/api';
+import { subscribeToRaceUpdates } from '../lib/echo';
+import { PALETTE, downloadTemplate, exportRoster, parseCSV } from '../lib/track';
+
+export default function Admin() {
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    api.me()
+      .then((data) => setUser(data.user))
+      .catch(() => setToken(null))
+      .finally(() => setCheckingAuth(false));
+  }, []);
+
+  if (checkingAuth) return <div className="wrap"><p style={{ textAlign: 'center', padding: 40 }}>Loading…</p></div>;
+
+  return user ? <Editor user={user} onLogout={() => setUser(null)} /> : <Login onLoggedIn={setUser} />;
+}
+
+function Login({ onLoggedIn }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      const data = await api.login(email, password);
+      setToken(data.token);
+      onLoggedIn(data.user);
+    } catch (err) {
+      setError(err.message || 'Login failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="wrap" style={{ maxWidth: 420 }}>
+      <div className="banner">
+        <div className="checker" />
+        <h1 style={{ fontSize: 32 }}>Admin Login</h1>
+        <div className="sub">Race to Quota</div>
+      </div>
+      <form onSubmit={handleSubmit} className="empty-state" style={{ textAlign: 'left' }}>
+        <label style={{ display: 'block', fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Email</label>
+        <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+          style={inputStyle} autoFocus />
+        <label style={{ display: 'block', fontWeight: 800, fontSize: 13, margin: '14px 0 6px' }}>Password</label>
+        <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+          style={inputStyle} />
+        {error && <p style={{ color: '#c0392b', fontWeight: 700, marginTop: 12 }}>{error}</p>}
+        <button className="add" type="submit" disabled={busy} style={{ width: '100%', marginTop: 18 }}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ccc',
+  fontFamily: 'Outfit, sans-serif', fontSize: 14, boxSizing: 'border-box',
+};
+
+function Editor({ user, onLogout }) {
+  const [team, setTeam] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [search, setSearch] = useState('');
+  const [syncNote, setSyncNote] = useState('Loading roster…');
+  const [dragOver, setDragOver] = useState(false);
+  const [modal, setModal] = useState(null); // {title, body, actions:[{label,onClick,danger}]}
+  const fileInputRef = useRef(null);
+  const photoInputsRef = useRef({});
+  const saveTimers = useRef({});
+  const rowsContainerRef = useRef(null);
+
+  useEffect(() => {
+    api.getTeam().then((data) => { setTeam(data.team || []); setLoaded(true); setSyncNote('☁️ Synced — changes go live instantly'); });
+
+    const unsubscribe = subscribeToRaceUpdates((newTeam) => {
+      const isTyping = document.activeElement && rowsContainerRef.current?.contains(document.activeElement);
+      if (isTyping) return; // don't yank focus out from under someone mid-edit
+      setTeam(newTeam);
+    });
+    return unsubscribe;
+  }, []);
+
+  function scheduleSave(id, patch) {
+    clearTimeout(saveTimers.current[id]);
+    saveTimers.current[id] = setTimeout(async () => {
+      try {
+        await api.updateMember(id, patch);
+      } catch (e) {
+        setSyncNote('⚠️ Could not save a change — check your connection.');
+      }
+    }, 450);
+  }
+
+  function updateField(id, field, value) {
+    setTeam((prev) => prev.map((m) => (m.id === id ? { ...m, [field]: value } : m)));
+    scheduleSave(id, { [field]: field === 'pct' ? Math.max(0, Math.min(999, parseInt(value || 0, 10) || 0)) : value });
+  }
+
+  async function addTeammate() {
+    try {
+      const { member } = await api.createMember({
+        name: 'New teammate', team: '', pct: 0, color: PALETTE[team.length % PALETTE.length],
+      });
+      setTeam((prev) => [...prev, member]);
+      setTimeout(() => {
+        const inputs = rowsContainerRef.current?.querySelectorAll('input[data-field="name"]');
+        const last = inputs?.[inputs.length - 1];
+        last?.focus();
+        last?.select();
+      }, 0);
+    } catch (e) {
+      setSyncNote('⚠️ Could not add teammate — check your connection.');
+    }
+  }
+
+  async function removeTeammate(id) {
+    setTeam((prev) => prev.filter((m) => m.id !== id));
+    try { await api.deleteMember(id); } catch (e) { setSyncNote('⚠️ Could not remove teammate — check your connection.'); }
+  }
+
+  function confirmClearAll() {
+    if (!team.length) return;
+    setModal({
+      title: 'Remove all teammates?',
+      body: 'This clears everyone from the race and cannot be undone.',
+      actions: [
+        { label: 'Cancel' },
+        { label: 'Remove all', danger: true, onClick: async () => {
+          setTeam([]);
+          try { await api.clearAll(); } catch (e) { setSyncNote('⚠️ Could not clear roster — check your connection.'); }
+        } },
+      ],
+    });
+  }
+
+  async function handlePhotoPick(id, file) {
+    if (!file) return;
+    try {
+      const { member } = await api.uploadPhoto(id, file);
+      setTeam((prev) => prev.map((m) => (m.id === id ? member : m)));
+    } catch (e) {
+      setSyncNote('⚠️ Photo upload failed — check the file is an image under 5MB.');
+    }
+  }
+
+  async function commitImport(rows, mode) {
+    try {
+      await api.importRows(rows, mode);
+      const data = await api.getTeam();
+      setTeam(data.team || []);
+      setSyncNote(`Imported ${rows.length} teammate${rows.length === 1 ? '' : 's'}${mode === 'merge' ? ' (added to existing roster)' : ''} 🎉`);
+    } catch (e) {
+      setSyncNote('⚠️ Import failed — check your connection.');
+    }
+  }
+
+  function handleCSVFile(file) {
+    if (!file) return;
+    const looksLikeCSV = /\.csv$/i.test(file.name) || file.type === 'text/csv' || file.type === '';
+    if (!looksLikeCSV) { setSyncNote('Please choose a .csv file.'); return; }
+    const rd = new FileReader();
+    rd.onload = () => {
+      let parsed;
+      try { parsed = parseCSV(String(rd.result || '')); } catch { setSyncNote('That file could not be parsed as CSV.'); return; }
+      if (!parsed.rows.length) { setSyncNote('No teammates found in that file.'); return; }
+      const skippedNote = parsed.skipped ? ` (${parsed.skipped} row${parsed.skipped === 1 ? '' : 's'} skipped — missing name)` : '';
+      if (team.length) {
+        setModal({
+          title: 'Import CSV',
+          body: `Found ${parsed.rows.length} teammate${parsed.rows.length === 1 ? '' : 's'}${skippedNote}. Add them to your current roster of ${team.length}, or replace it entirely?`,
+          actions: [
+            { label: 'Cancel' },
+            { label: 'Merge — add to roster', onClick: () => commitImport(parsed.rows, 'merge') },
+            { label: 'Replace roster', danger: true, onClick: () => commitImport(parsed.rows, 'replace') },
+          ],
+        });
+      } else {
+        commitImport(parsed.rows, 'replace');
+      }
+    };
+    rd.readAsText(file);
+  }
+
+  async function handleLogout() {
+    try { await api.logout(); } catch (e) { /* token may already be invalid — fine */ }
+    setToken(null);
+    onLogout();
+  }
+
+  const filtered = team.filter((m) => {
+    const q = search.trim().toLowerCase();
+    return !q || (m.name || '').toLowerCase().includes(q) || (m.team || '').toLowerCase().includes(q);
+  });
+
+  return (
+    <div className="wrap">
+      <div className="banner">
+        <div className="checker" />
+        <h1 style={{ fontSize: 32 }}>Admin</h1>
+        <div className="sub">Signed in as {user?.name || user?.email}</div>
+      </div>
+
+      <div className="editor open" id="editor" style={{ maxWidth: 900, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <h2 style={{ margin: 0 }}>Your Team</h2>
+          <button className="btn-tv" onClick={handleLogout}>Log out</button>
+        </div>
+        <p className="savenote" id="saveNote">{syncNote}</p>
+
+        <div className="sectionlabel">Import teammates</div>
+        <div
+          className={`dropzone${dragOver ? ' drag' : ''}`}
+          tabIndex={0}
+          role="button"
+          aria-label="Upload CSV file"
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) handleCSVFile(f); }}
+        >
+          <span className="dz-icon">📄</span>
+          <div className="dz-main">Drag a CSV file here, or click to browse</div>
+          <div className="dz-sub">Columns: <b>name, team, percentage, color</b> (team and color are optional).</div>
+        </div>
+        <input ref={fileInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }}
+          onChange={(e) => { if (e.target.files?.[0]) handleCSVFile(e.target.files[0]); e.target.value = ''; }} />
+
+        <div className="csvbar">
+          <button className="btn-tmpl" onClick={downloadTemplate}>⬇ Download CSV template</button>
+          <button className="btn-export" onClick={() => (team.length ? exportRoster(team) : setSyncNote('No teammates to export yet.'))}>⬇ Export current roster</button>
+          <button className="btn-clear" onClick={confirmClearAll}>Clear all teammates</button>
+        </div>
+
+        <div className="sectionlabel">Teammates</div>
+        <div className="searchbar">
+          <input type="text" placeholder="🔍 Search by name or team…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+
+        <div className="rowhead">
+          <span>Photo</span><span>Name</span><span>Team</span><span>%</span><span>Progress</span><span>Color</span><span></span>
+        </div>
+        <div className="scrollbox">
+          <div id="rows" ref={rowsContainerRef}>
+            {!loaded && <p className="noresults">Loading…</p>}
+            {loaded && !filtered.length && (
+              <p className="noresults">{team.length ? `No teammates match "${search}"` : 'No teammates yet — add one below or import a CSV above.'}</p>
+            )}
+            {filtered.map((m) => (
+              <Row key={m.id} member={m} onChange={updateField} onRemove={removeTeammate}
+                onPhotoPick={handlePhotoPick} photoInputsRef={photoInputsRef} />
+            ))}
+          </div>
+        </div>
+        <button className="add" onClick={addTeammate}>+ Add teammate</button>
+        <p className="count">{team.length} teammate{team.length === 1 ? '' : 's'} total.</p>
+      </div>
+
+      {modal && (
+        <div className="modal-overlay show" onClick={(e) => { if (e.target === e.currentTarget) setModal(null); }}>
+          <div className="modal">
+            <h3>{modal.title}</h3>
+            <p>{modal.body}</p>
+            <div className="modal-actions">
+              {modal.actions.map((a, i) => (
+                <button key={i} className={a.danger ? 'btn-clear' : 'btn-edit'}
+                  onClick={() => { setModal(null); a.onClick?.(); }}>{a.label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Row({ member, onChange, onRemove, onPhotoPick, photoInputsRef }) {
+  const tier = member.pct >= 150 ? 'mvp' : member.pct >= 100 ? 'done' : member.pct >= 70 ? 'warm' : '';
+  const barWidth = Math.max(0, Math.min(100, member.pct));
+
+  return (
+    <div className="row">
+      <div className="avatar" onClick={() => photoInputsRef.current[member.id]?.click()} title="Click to change photo"
+        style={member.photo ? { backgroundImage: `url('${member.photo}')` } : undefined}>
+        {!member.photo && (member.name || '?').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+      </div>
+      <input ref={(el) => { if (el) photoInputsRef.current[member.id] = el; }} type="file" accept="image/*" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onPhotoPick(member.id, f); e.target.value = ''; }} />
+      <input type="text" data-field="name" value={member.name || ''} placeholder="Name"
+        onChange={(e) => onChange(member.id, 'name', e.target.value)} />
+      <input type="text" data-field="team" value={member.team || ''} placeholder="Team"
+        onChange={(e) => onChange(member.id, 'team', e.target.value)} />
+      <input type="number" min="0" max="999" value={member.pct} data-field="pct"
+        onChange={(e) => onChange(member.id, 'pct', e.target.value)} />
+      <div className="minibar"><i className={tier} style={{ width: barWidth + '%' }} /></div>
+      <input type="color" className="colordot" value={member.color || '#2d8cff'}
+        onChange={(e) => onChange(member.id, 'color', e.target.value)} />
+      <button className="rm" title="Remove" onClick={() => onRemove(member.id)}>✕</button>
+    </div>
+  );
+}
