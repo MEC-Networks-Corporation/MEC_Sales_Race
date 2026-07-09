@@ -1,9 +1,97 @@
 import { useEffect, useRef } from 'react';
 import { adaptSizing, carSVG, initials, leftFor, tierFor, visibleTeam } from '../lib/track';
 
+// Builds the persistent DOM structure for one racer. Only created once per
+// member id — later updates mutate this in place instead of rebuilding it, so
+// unrelated racers never get touched (and never re-animate) when one teammate
+// changes.
+function createLaneEntry(startAtLeft) {
+  const laneEl = document.createElement('div');
+  laneEl.className = 'lane';
+
+  const racerEl = document.createElement('div');
+  racerEl.className = 'racer';
+  racerEl.style.left = startAtLeft;
+
+  const speedEl = document.createElement('div');
+  speedEl.className = 'speed';
+  speedEl.innerHTML = '<i></i><i></i><i></i>';
+
+  const puffEl = document.createElement('div');
+  puffEl.className = 'puff';
+
+  const crownEl = document.createElement('div');
+  crownEl.className = 'crown';
+  crownEl.style.display = 'none';
+
+  const pctEl = document.createElement('div');
+  pctEl.className = 'pct';
+
+  const carwrapEl = document.createElement('div');
+  carwrapEl.className = 'carwrap';
+
+  const faceEl = document.createElement('div');
+  faceEl.className = 'face';
+
+  const carEl = document.createElement('div');
+  carEl.className = 'car';
+
+  const plateEl = document.createElement('div');
+  plateEl.className = 'plate';
+
+  const rankEl = document.createElement('span');
+  rankEl.className = 'rank';
+
+  const nmEl = document.createElement('span');
+  nmEl.className = 'nm';
+
+  const tmEl = document.createElement('span');
+  tmEl.className = 'tm';
+  tmEl.style.display = 'none';
+
+  plateEl.append(rankEl, nmEl, tmEl);
+  carwrapEl.append(faceEl, carEl, plateEl);
+  racerEl.append(speedEl, puffEl, crownEl, pctEl, carwrapEl);
+  laneEl.append(racerEl);
+
+  return { laneEl, racerEl, crownEl, pctEl, puffEl, faceEl, carEl, rankEl, nmEl, tmEl, snapshot: null };
+}
+
+function paintContent(entry, m, rank) {
+  const tier = tierFor(m.pct);
+  entry.racerEl.classList.toggle('mvp', tier === 'mvp');
+  entry.pctEl.className = 'pct ' + tier;
+  entry.pctEl.textContent = tier === 'mvp' ? `🔥 ${m.pct}%` : `${m.pct}%`;
+  entry.puffEl.textContent = m.pct >= 100 ? '🔥' : '💨';
+
+  const rankClass = rank === 0 ? 'g1' : rank === 1 ? 'g2' : rank === 2 ? 'g3' : '';
+  entry.rankEl.className = 'rank ' + rankClass;
+  entry.rankEl.textContent = `#${rank + 1}`;
+  entry.nmEl.textContent = m.name || '—';
+
+  if (m.team) { entry.tmEl.style.display = ''; entry.tmEl.textContent = m.team; }
+  else { entry.tmEl.style.display = 'none'; }
+
+  if (rank === 0 && m.pct >= 100) { entry.crownEl.style.display = ''; entry.crownEl.textContent = tier === 'mvp' ? '👑' : '🏆'; }
+  else { entry.crownEl.style.display = 'none'; }
+
+  if (m.photo) { entry.faceEl.style.backgroundImage = `url('${m.photo}')`; entry.faceEl.textContent = ''; }
+  else { entry.faceEl.style.backgroundImage = ''; entry.faceEl.textContent = initials(m.name); }
+
+  entry.carEl.innerHTML = carSVG(m.color);
+}
+
+function animateTo(entry, pct) {
+  entry.racerEl.classList.add('racing');
+  void entry.racerEl.offsetWidth; // force reflow so the transition kicks in
+  requestAnimationFrame(() => setTimeout(() => { entry.racerEl.style.left = leftFor(pct) + '%'; }, 60));
+  setTimeout(() => entry.racerEl.classList.remove('racing'), 2700);
+}
+
 export default function RaceTrack({ team, currentFilter }) {
   const trackRef = useRef(null);
   const statsRef = useRef(null);
+  const lanesRef = useRef(new Map()); // member id -> lane entry, persists across renders
 
   useEffect(() => {
     const trackEl = trackRef.current;
@@ -36,42 +124,45 @@ export default function RaceTrack({ team, currentFilter }) {
       }
     }
 
-    // Rebuild lanes
-    [...trackEl.querySelectorAll('.lane')].forEach((l) => l.remove());
-    list.forEach((m, i) => {
-      const laneEl = document.createElement('div');
-      laneEl.className = 'lane';
-      const face = m.photo
-        ? `<div class="face" style="background-image:url('${m.photo}')"></div>`
-        : `<div class="face">${initials(m.name)}</div>`;
-      const rankClass = i === 0 ? 'g1' : i === 1 ? 'g2' : i === 2 ? 'g3' : '';
-      const teamTag = m.team ? `<span class="tm">${m.team}</span>` : '';
-      const tier = tierFor(m.pct);
-      const mvpClass = tier === 'mvp' ? ' mvp' : '';
-      const crown = i === 0 && m.pct >= 100 ? `<div class="crown">${tier === 'mvp' ? '👑' : '🏆'}</div>` : '';
-      const trailEmoji = m.pct >= 100 ? '🔥' : '💨';
-      const pctText = tier === 'mvp' ? `🔥 ${m.pct}%` : `${m.pct}%`;
-      laneEl.innerHTML = `<div class="racer${mvpClass}" data-idx="${i}" style="left:18px">
-        <div class="speed"><i></i><i></i><i></i></div>
-        <div class="puff">${trailEmoji}</div>
-        ${crown}
-        <div class="pct ${tier}">${pctText}</div>
-        <div class="carwrap">${face}<div class="car">${carSVG(m.color)}</div>
-        <div class="plate"><span class="rank ${rankClass}">#${i + 1}</span><span class="nm">${m.name || '—'}</span>${teamTag}</div></div></div>`;
-      trackEl.appendChild(laneEl);
+    const lanes = lanesRef.current;
+    const seen = new Set();
+
+    list.forEach((m, rank) => {
+      seen.add(m.id);
+      let entry = lanes.get(m.id);
+      const prev = entry?.snapshot;
+
+      if (!entry) {
+        // New teammate — create their lane and drive them in from the start line.
+        entry = createLaneEntry('18px');
+        trackEl.appendChild(entry.laneEl);
+        lanes.set(m.id, entry);
+        paintContent(entry, m, rank);
+        animateTo(entry, m.pct);
+      } else {
+        const pctChanged = !prev || prev.pct !== m.pct;
+        const otherChanged = !prev || prev.name !== m.name || prev.team !== m.team
+          || prev.color !== m.color || prev.photo !== m.photo;
+        const rankChanged = !prev || prev.rank !== rank;
+
+        if (pctChanged || otherChanged || rankChanged) paintContent(entry, m, rank);
+        // Only move the racer whose percentage actually changed — everyone
+        // else keeps their current track position.
+        if (pctChanged) animateTo(entry, m.pct);
+      }
+
+      entry.snapshot = { pct: m.pct, name: m.name, team: m.team, color: m.color, photo: m.photo, rank };
     });
 
-    // Animate every racer out to its position — this runs on first render and
-    // again every time the roster changes (including live updates from the
-    // admin), so the board always "re-races" into the new standings.
-    const racers = trackEl.querySelectorAll('.racer');
-    racers.forEach((r) => {
-      const m = list[+r.dataset.idx];
-      r.classList.add('racing');
-      void r.offsetWidth;
-      requestAnimationFrame(() => setTimeout(() => { r.style.left = leftFor(m.pct) + '%'; }, 60));
-      setTimeout(() => r.classList.remove('racing'), 2700);
-    });
+    // Drop lanes for teammates no longer in the (filtered) list.
+    for (const [id, entry] of lanes) {
+      if (!seen.has(id)) { entry.laneEl.remove(); lanes.delete(id); }
+    }
+
+    // Reorder lane DOM nodes to match current standings. appendChild on an
+    // already-attached node just moves it — it doesn't recreate or restart
+    // any in-flight CSS transition on the racer inside it.
+    list.forEach((m) => trackEl.appendChild(lanes.get(m.id).laneEl));
   }, [team, currentFilter]);
 
   return (

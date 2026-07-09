@@ -75,14 +75,25 @@ export function exportRoster(team) {
 }
 
 export function parseCSV(text) {
+  // Strip a UTF-8 BOM — spreadsheet apps prepend one when exporting "CSV UTF-8".
+  text = text.replace(/^﻿/, '');
   const lines = text.replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '');
   if (!lines.length) return { rows: [], skipped: 0 };
+
+  // Auto-detect the delimiter — many spreadsheet apps export CSV with ';' instead
+  // of ',' under non-US locale settings, which would otherwise silently mangle
+  // every row into one giant "name" field.
+  const delimiter = [',', ';', '\t'].reduce(
+    (best, d) => { const count = lines[0].split(d).length - 1; return count > best.count ? { d, count } : best; },
+    { d: ',', count: -1 },
+  ).d;
+
   const split = (l) => {
     const out = [];
     let cur = '', q = false;
     for (const c of l) {
       if (c === '"') q = !q;
-      else if (c === ',' && !q) { out.push(cur); cur = ''; }
+      else if (c === delimiter && !q) { out.push(cur); cur = ''; }
       else cur += c;
     }
     out.push(cur);

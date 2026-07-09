@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Events\TeamUpdated;
 use App\Http\Controllers\Controller;
+use App\Models\RaceSetting;
 use App\Models\TeamMember;
+use App\Models\TeamSnapshot;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 class TeamMemberController extends Controller
 {
@@ -16,7 +18,12 @@ class TeamMemberController extends Controller
         $team = TeamMember::orderBy('sort_order')->orderBy('id')->get()
             ->map(fn (TeamMember $m) => $m->toRace());
 
-        return response()->json(['team' => $team]);
+        $setting = RaceSetting::current();
+
+        return response()->json([
+            'team' => $team,
+            'period' => ['quarter' => $setting->quarter, 'year' => $setting->year],
+        ]);
     }
 
     // Admin only (see routes/api.php) below this line.
@@ -29,6 +36,8 @@ class TeamMemberController extends Controller
             'pct' => ['nullable', 'integer', 'min:0', 'max:999'],
             'color' => ['nullable', 'regex:/^#[0-9a-fA-F]{3,6}$/'],
         ]);
+
+        TeamSnapshot::capture();
 
         $maxSort = TeamMember::max('sort_order') ?? 0;
 
@@ -54,6 +63,8 @@ class TeamMemberController extends Controller
             'color' => ['sometimes', 'regex:/^#[0-9a-fA-F]{3,6}$/'],
         ]);
 
+        TeamSnapshot::capture();
+
         $teamMember->update($data);
 
         broadcast(new TeamUpdated());
@@ -63,9 +74,12 @@ class TeamMemberController extends Controller
 
     public function destroy(TeamMember $teamMember)
     {
-        if ($teamMember->photo_path) {
-            Storage::disk('public')->delete($teamMember->photo_path);
-        }
+        TeamSnapshot::capture();
+
+        // Note: the photo file is deliberately left on disk (not deleted) so
+        // that "undo last change" can bring the row back with a working
+        // photo. This can leave orphaned files behind over time, which is an
+        // acceptable trade-off for a small internal tool.
         $teamMember->delete();
 
         broadcast(new TeamUpdated());
@@ -75,9 +89,8 @@ class TeamMemberController extends Controller
 
     public function clearAll()
     {
-        foreach (TeamMember::whereNotNull('photo_path')->pluck('photo_path') as $path) {
-            Storage::disk('public')->delete($path);
-        }
+        TeamSnapshot::capture();
+
         TeamMember::query()->delete();
 
         broadcast(new TeamUpdated());
@@ -98,10 +111,9 @@ class TeamMemberController extends Controller
             'rows.*.color' => ['nullable', 'regex:/^#[0-9a-fA-F]{3,6}$/'],
         ]);
 
+        TeamSnapshot::capture();
+
         if ($data['mode'] === 'replace') {
-            foreach (TeamMember::whereNotNull('photo_path')->pluck('photo_path') as $path) {
-                Storage::disk('public')->delete($path);
-            }
             TeamMember::query()->delete();
         }
 
@@ -130,15 +142,42 @@ class TeamMemberController extends Controller
             'photo' => ['required', 'image', 'max:5120'], // 5MB
         ]);
 
-        if ($teamMember->photo_path) {
-            Storage::disk('public')->delete($teamMember->photo_path);
-        }
+        TeamSnapshot::capture();
 
+        // Old photo file is intentionally left on disk — see note in destroy().
         $path = $request->file('photo')->store('team-photos', 'public');
         $teamMember->update(['photo_path' => $path]);
 
         broadcast(new TeamUpdated());
 
         return response()->json(['member' => $teamMember->fresh()->toRace()]);
+    }
+
+    // Reverts the roster to how it looked right before the last mutating
+    // action (add/edit/delete/import/clear/photo). Single level of undo.
+    public function undo()
+    {
+        $payload = TeamSnapshot::row()->payload;
+
+        if ($payload === null) {
+            return response()->json(['ok' => false, 'message' => 'Nothing to undo.'], 409);
+        }
+
+        DB::transaction(function () use ($payload) {
+            TeamMember::query()->delete();
+
+            if (! empty($payload)) {
+                DB::table('team_members')->insert($payload);
+            }
+
+            TeamSnapshot::clear();
+        });
+
+        broadcast(new TeamUpdated());
+
+        $team = TeamMember::orderBy('sort_order')->orderBy('id')->get()
+            ->map(fn (TeamMember $m) => $m->toRace());
+
+        return response()->json(['ok' => true, 'team' => $team]);
     }
 }

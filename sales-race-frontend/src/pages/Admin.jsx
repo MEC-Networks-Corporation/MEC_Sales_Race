@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, setToken } from '../lib/api';
 import { subscribeToRaceUpdates } from '../lib/echo';
 import { PALETTE, downloadTemplate, exportRoster, parseCSV } from '../lib/track';
@@ -70,9 +71,13 @@ const inputStyle = {
 
 function Editor({ user, onLogout }) {
   const [team, setTeam] = useState([]);
+  const [period, setPeriod] = useState(null);
+  const [periodBusy, setPeriodBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState('');
   const [syncNote, setSyncNote] = useState('Loading roster…');
+  const [undoLabel, setUndoLabel] = useState(null); // short description of the last change, or null if nothing to undo
+  const [undoBusy, setUndoBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [modal, setModal] = useState(null); // {title, body, actions:[{label,onClick,danger}]}
   const fileInputRef = useRef(null);
@@ -81,21 +86,41 @@ function Editor({ user, onLogout }) {
   const rowsContainerRef = useRef(null);
 
   useEffect(() => {
-    api.getTeam().then((data) => { setTeam(data.team || []); setLoaded(true); setSyncNote('☁️ Synced — changes go live instantly'); });
+    api.getTeam().then((data) => {
+      setTeam(data.team || []);
+      setPeriod(data.period || null);
+      setLoaded(true);
+      setSyncNote('☁️ Synced — changes go live instantly');
+    });
 
-    const unsubscribe = subscribeToRaceUpdates((newTeam) => {
+    const unsubscribe = subscribeToRaceUpdates((newTeam, newPeriod) => {
       const isTyping = document.activeElement && rowsContainerRef.current?.contains(document.activeElement);
-      if (isTyping) return; // don't yank focus out from under someone mid-edit
-      setTeam(newTeam);
+      if (!isTyping) setTeam(newTeam);
+      if (newPeriod) setPeriod(newPeriod);
     });
     return unsubscribe;
   }, []);
 
-  function scheduleSave(id, patch) {
+  async function updatePeriod(patch) {
+    const next = { ...period, ...patch };
+    setPeriod(next);
+    setPeriodBusy(true);
+    try {
+      const { period: saved } = await api.updateSettings(next.quarter, next.year);
+      setPeriod(saved);
+    } catch (e) {
+      setSyncNote('⚠️ Could not save the quarter/year — check your connection.');
+    } finally {
+      setPeriodBusy(false);
+    }
+  }
+
+  function scheduleSave(id, patch, label) {
     clearTimeout(saveTimers.current[id]);
     saveTimers.current[id] = setTimeout(async () => {
       try {
         await api.updateMember(id, patch);
+        setUndoLabel(label);
       } catch (e) {
         setSyncNote('⚠️ Could not save a change — check your connection.');
       }
@@ -103,8 +128,13 @@ function Editor({ user, onLogout }) {
   }
 
   function updateField(id, field, value) {
+    const name = team.find((m) => m.id === id)?.name || 'teammate';
     setTeam((prev) => prev.map((m) => (m.id === id ? { ...m, [field]: value } : m)));
-    scheduleSave(id, { [field]: field === 'pct' ? Math.max(0, Math.min(999, parseInt(value || 0, 10) || 0)) : value });
+    scheduleSave(
+      id,
+      { [field]: field === 'pct' ? Math.max(0, Math.min(999, parseInt(value || 0, 10) || 0)) : value },
+      `edited ${name}`,
+    );
   }
 
   async function addTeammate() {
@@ -113,6 +143,7 @@ function Editor({ user, onLogout }) {
         name: 'New teammate', team: '', pct: 0, color: PALETTE[team.length % PALETTE.length],
       });
       setTeam((prev) => [...prev, member]);
+      setUndoLabel('added a teammate');
       setTimeout(() => {
         const inputs = rowsContainerRef.current?.querySelectorAll('input[data-field="name"]');
         const last = inputs?.[inputs.length - 1];
@@ -125,20 +156,44 @@ function Editor({ user, onLogout }) {
   }
 
   async function removeTeammate(id) {
+    const removed = team.find((m) => m.id === id);
     setTeam((prev) => prev.filter((m) => m.id !== id));
-    try { await api.deleteMember(id); } catch (e) { setSyncNote('⚠️ Could not remove teammate — check your connection.'); }
+    try {
+      await api.deleteMember(id);
+      setUndoLabel(`removed ${removed?.name || 'a teammate'}`);
+    } catch (e) {
+      setSyncNote('⚠️ Could not remove teammate — check your connection.');
+    }
+  }
+
+  async function undoLastChange() {
+    setUndoBusy(true);
+    try {
+      const data = await api.undoLastChange();
+      setTeam(data.team || []);
+      setUndoLabel(null);
+      setSyncNote('↩️ Last change undone');
+    } catch (e) {
+      setSyncNote(e.status === 409 ? 'Nothing left to undo.' : '⚠️ Could not undo — check your connection.');
+      setUndoLabel(null);
+    } finally {
+      setUndoBusy(false);
+    }
   }
 
   function confirmClearAll() {
     if (!team.length) return;
     setModal({
       title: 'Remove all teammates?',
-      body: 'This clears everyone from the race and cannot be undone.',
+      body: 'This clears everyone from the race. You can undo it right after with the Undo button.',
       actions: [
         { label: 'Cancel' },
         { label: 'Remove all', danger: true, onClick: async () => {
           setTeam([]);
-          try { await api.clearAll(); } catch (e) { setSyncNote('⚠️ Could not clear roster — check your connection.'); }
+          try {
+            await api.clearAll();
+            setUndoLabel('cleared the roster');
+          } catch (e) { setSyncNote('⚠️ Could not clear roster — check your connection.'); }
         } },
       ],
     });
@@ -149,6 +204,7 @@ function Editor({ user, onLogout }) {
     try {
       const { member } = await api.uploadPhoto(id, file);
       setTeam((prev) => prev.map((m) => (m.id === id ? member : m)));
+      setUndoLabel(`changed ${member.name || 'a teammate'}'s photo`);
     } catch (e) {
       setSyncNote('⚠️ Photo upload failed — check the file is an image under 5MB.');
     }
@@ -159,6 +215,7 @@ function Editor({ user, onLogout }) {
       await api.importRows(rows, mode);
       const data = await api.getTeam();
       setTeam(data.team || []);
+      setUndoLabel(`imported ${rows.length} teammate${rows.length === 1 ? '' : 's'}`);
       setSyncNote(`Imported ${rows.length} teammate${rows.length === 1 ? '' : 's'}${mode === 'merge' ? ' (added to existing roster)' : ''} 🎉`);
     } catch (e) {
       setSyncNote('⚠️ Import failed — check your connection.');
@@ -214,9 +271,45 @@ function Editor({ user, onLogout }) {
       <div className="editor open" id="editor" style={{ maxWidth: 900, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           <h2 style={{ margin: 0 }}>Your Team</h2>
-          <button className="btn-tv" onClick={handleLogout}>Log out</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link to="/admin/users" className="btn-tv">👤 Manage Admins</Link>
+            <button className="btn-tv" onClick={handleLogout}>Log out</button>
+          </div>
         </div>
         <p className="savenote" id="saveNote">{syncNote}</p>
+        {undoLabel && (
+          <p className="savenote" style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center' }}>
+            You {undoLabel}.
+            <button className="btn-edit" style={{ padding: '4px 12px', fontSize: 12 }} onClick={undoLastChange} disabled={undoBusy}>
+              {undoBusy ? 'Undoing…' : '↩ Undo'}
+            </button>
+          </p>
+        )}
+
+        <div className="sectionlabel">Period</div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <label style={{ fontWeight: 800, fontSize: 13 }}>
+            Quarter{' '}
+            <select
+              value={period?.quarter ?? ''}
+              disabled={!period || periodBusy}
+              onChange={(e) => updatePeriod({ quarter: parseInt(e.target.value, 10) })}
+              style={{ ...inputStyle, width: 'auto', display: 'inline-block' }}
+            >
+              {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+            </select>
+          </label>
+          <label style={{ fontWeight: 800, fontSize: 13 }}>
+            Year{' '}
+            <input
+              type="number" min="2000" max="2100"
+              value={period?.year ?? ''}
+              disabled={!period || periodBusy}
+              onChange={(e) => updatePeriod({ year: parseInt(e.target.value, 10) || period?.year })}
+              style={{ ...inputStyle, width: 90, display: 'inline-block' }}
+            />
+          </label>
+        </div>
 
         <div className="sectionlabel">Import teammates</div>
         <div

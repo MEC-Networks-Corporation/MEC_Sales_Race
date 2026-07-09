@@ -21,14 +21,15 @@ function getEcho() {
 }
 
 /**
- * Subscribes to the public "race" channel and calls onUpdate(team) whenever
- * an admin change is broadcast. Returns an unsubscribe function for cleanup.
+ * Subscribes to the public "race" channel and calls onUpdate(team, period)
+ * whenever an admin change is broadcast. Returns an unsubscribe function for
+ * cleanup.
  */
 export function subscribeToRaceUpdates(onUpdate) {
   const echo = getEcho();
   const channel = echo.channel('race');
   channel.listen('.team.updated', (payload) => {
-    if (payload && Array.isArray(payload.team)) onUpdate(payload.team);
+    if (payload && Array.isArray(payload.team)) onUpdate(payload.team, payload.period);
   });
 
   return () => {

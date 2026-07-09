@@ -21,6 +21,7 @@
     background-size:18px 18px;background-position:0 0,0 9px,9px -9px,-9px 0;background-color:#fff;border-radius:14px 14px 0 0;opacity:.92;}
   h1{font-family:'Bungee',cursive;font-size:clamp(30px,6vw,56px);line-height:.95;margin:30px 0 4px;color:var(--ink);text-shadow:3px 3px 0 var(--line);letter-spacing:1px;}
   .sub{font-weight:800;text-transform:uppercase;letter-spacing:3px;font-size:13px;color:#0a2d3f;opacity:.8;}
+  .period{display:inline-block;margin-top:8px;font-family:'Bungee',cursive;font-size:13px;letter-spacing:1px;color:#fff;background:var(--finish);padding:4px 14px;border-radius:20px;box-shadow:0 3px 0 rgba(0,0,0,.2);}
 
   /* Stats bar */
   .statsbar{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:0 0 16px;}
@@ -105,7 +106,7 @@
 
   /* Controls */
   .bar{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:18px 0 4px;}
-  button{font-family:'Outfit',sans-serif;font-weight:800;cursor:pointer;border:none;border-radius:10px;padding:11px 20px;font-size:14px;transition:transform .1s;letter-spacing:.3px;}
+  button,a.btn-tv,a.btn-edit{font-family:'Outfit',sans-serif;font-weight:800;cursor:pointer;border:none;border-radius:10px;padding:11px 20px;font-size:14px;transition:transform .1s;letter-spacing:.3px;text-decoration:none;display:inline-block;}
   button:active{transform:translateY(2px);}
   button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none!important;transform:none!important;}
   .btn-go{background:var(--finish);color:#fff;box-shadow:0 4px 0 #a90000;}

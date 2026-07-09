@@ -10,6 +10,7 @@ const SCROLL_PAUSE_MS = 2600; // dwell time at top/bottom
 
 export default function Display() {
   const [team, setTeam] = useState([]);
+  const [period, setPeriod] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [currentFilter, setCurrentFilter] = useState('__ALL__');
@@ -19,10 +20,13 @@ export default function Display() {
   useEffect(() => {
     let cancelled = false;
     api.getTeam()
-      .then((data) => { if (!cancelled) { setTeam(data.team || []); setLoaded(true); } })
+      .then((data) => { if (!cancelled) { setTeam(data.team || []); setPeriod(data.period || null); setLoaded(true); } })
       .catch(() => { if (!cancelled) { setLoadError(true); setLoaded(true); } });
 
-    const unsubscribe = subscribeToRaceUpdates((newTeam) => setTeam(newTeam));
+    const unsubscribe = subscribeToRaceUpdates((newTeam, newPeriod) => {
+      setTeam(newTeam);
+      if (newPeriod) setPeriod(newPeriod);
+    });
     return () => { cancelled = true; unsubscribe(); };
   }, []);
 
@@ -78,6 +82,7 @@ export default function Display() {
         <div className="checker" />
         <h1>Race to Quota</h1>
         <div className="sub">🏁 The push to 100% (and beyond) 🏁</div>
+        {period && <div className="period">Q{period.quarter} {period.year}</div>}
       </div>
 
       {loaded && loadError && (

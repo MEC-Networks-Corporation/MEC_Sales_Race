@@ -47,8 +47,13 @@ export const api = {
   createMember: (member) => request('/team-members', { method: 'POST', body: member }),
   updateMember: (id, patch) => request(`/team-members/${id}`, { method: 'PUT', body: patch }),
   deleteMember: (id) => request(`/team-members/${id}`, { method: 'DELETE' }),
+  undoLastChange: () => request('/team-members/undo', { method: 'POST' }),
   clearAll: () => request('/team-members', { method: 'DELETE' }),
   importRows: (rows, mode) => request('/team-members/import', { method: 'POST', body: { rows, mode } }),
+  updateSettings: (quarter, year) => request('/settings', { method: 'PUT', body: { quarter, year } }),
+  listAdmins: () => request('/admin-users'),
+  createAdmin: (admin) => request('/admin-users', { method: 'POST', body: admin }),
+  deleteAdmin: (id) => request(`/admin-users/${id}`, { method: 'DELETE' }),
   uploadPhoto: (id, file) => {
     const form = new FormData();
     form.append('photo', file);
