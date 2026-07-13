@@ -11,14 +11,15 @@
     font-family:'Outfit',sans-serif;
     background:radial-gradient(120% 80% at 50% -10%, var(--sky-3) 0%, var(--sky-2) 35%, var(--sky-1) 100%);
     color:var(--ink); min-height:100vh; padding:22px;
+    overflow-x:hidden;
   }
   .wrap{max-width:1180px;margin:0 auto;}
 
   /* Header */
   .banner{position:relative;text-align:center;padding:18px 16px 22px;}
-  .checker{position:absolute;inset:0 0 auto 0;height:18px;
+  .checker{position:absolute;left:50%;top:0;width:100vw;transform:translateX(-50%);height:18px;
     background-image:linear-gradient(45deg,#111 25%,transparent 25%),linear-gradient(-45deg,#111 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#111 75%),linear-gradient(-45deg,transparent 75%,#111 75%);
-    background-size:18px 18px;background-position:0 0,0 9px,9px -9px,-9px 0;background-color:#fff;border-radius:14px 14px 0 0;opacity:.92;}
+    background-size:18px 18px;background-position:0 0,0 9px,9px -9px,-9px 0;background-color:#fff;opacity:.92;}
   h1{font-family:'Bungee',cursive;font-size:clamp(30px,6vw,56px);line-height:.95;margin:30px 0 4px;color:var(--ink);text-shadow:3px 3px 0 var(--line);letter-spacing:1px;}
   .sub{font-weight:800;text-transform:uppercase;letter-spacing:3px;font-size:13px;color:#0a2d3f;opacity:.8;}
   .period{display:inline-block;margin-top:8px;font-family:'Bungee',cursive;font-size:13px;letter-spacing:1px;color:#fff;background:var(--finish);padding:4px 14px;border-radius:20px;box-shadow:0 3px 0 rgba(0,0,0,.2);}
@@ -115,7 +116,7 @@
 
   .legend{text-align:center;font-size:12px;color:#0a2d3f;opacity:.8;font-weight:700;margin:8px 0 0;}
 
-  .editor{background:rgba(255,255,255,.97);border-radius:16px;padding:18px;margin-top:14px;box-shadow:0 14px 34px rgba(20,30,50,.25);display:none;}
+  .editor{background:rgba(255,255,255,.97);border-radius:16px;padding:26px 18px 18px;margin-top:14px;box-shadow:0 14px 34px rgba(20,30,50,.25);display:none;}
   .editor.open{display:block;}
   .editor h2{font-family:'Bungee',cursive;font-size:18px;margin:0 0 6px;}
   .editor .sectionlabel{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#889;margin:16px 0 8px;}

@@ -41,6 +41,47 @@ export function carSVG(color) {
   </svg>`;
 }
 
+// March–May: a pointed-nose surfboard carving through a curling wave.
+export function surfboardSVG(color) {
+  return `<svg width="104" height="52" viewBox="0 0 104 52" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="52" cy="47" rx="46" ry="5" fill="rgba(0,0,0,.18)"/>
+    <path d="M6 46 C2 36 6 22 22 18 C34 15 42 22 40 30 C38 36 28 34 24 40 C20 46 12 48 6 46 Z" fill="#1f9fe0"/>
+    <path d="M22 18 C34 15 42 22 40 30" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="30" cy="19" r="2" fill="rgba(255,255,255,.65)"/>
+    <circle cx="38" cy="25" r="1.6" fill="rgba(255,255,255,.55)"/>
+    <path d="M16 24 Q55 14 96 26 Q55 38 16 32 Q10 28 16 24 Z" fill="${color}"/>
+    <path d="M24 28 Q55 25 90 26" stroke="rgba(255,255,255,.6)" stroke-width="1.5" fill="none"/>
+    <path d="M19 31 L26 31 L22 39 Z" fill="#15171c" opacity=".75"/>
+  </svg>`;
+}
+
+// December: Santa's sleigh — curled runner tip, flat blade, boxy seat back.
+export function sleighSVG(color) {
+  return `<svg width="104" height="52" viewBox="0 0 104 52" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="52" cy="47" rx="46" ry="5" fill="rgba(0,0,0,.22)"/>
+    <path d="M6 42 Q4 40 8 40 L92 40 Q96 40 94 42 Q90 46 84 46 L14 46 Q8 46 6 42 Z" fill="#c9a227"/>
+    <path d="M10 40 Q4 40 4 34 Q4 24 16 16 Q24 10 34 14 L88 14 Q96 14 96 22 L96 34 Q96 40 88 40 L10 40 Z" fill="${color}"/>
+    <rect x="38" y="18" width="46" height="5" rx="2.5" fill="rgba(255,255,255,.5)"/>
+    <circle cx="26" cy="12" r="4" fill="#ffe27a"/>
+    <circle cx="19" cy="19" r="2.6" fill="#ff3b3b"/>
+  </svg>`;
+}
+
+// Which vehicle the race track shows this month — a seasonal reskin of the racer.
+export function seasonalVehicle(date = new Date()) {
+  const month = date.getMonth() + 1; // 1-12
+  if (month >= 3 && month <= 5) return 'surfboard';
+  if (month === 12) return 'sleigh';
+  return 'car';
+}
+
+export function vehicleSVG(color, date) {
+  const vehicle = seasonalVehicle(date);
+  if (vehicle === 'surfboard') return surfboardSVG(color);
+  if (vehicle === 'sleigh') return sleighSVG(color);
+  return carSVG(color);
+}
+
 export function visibleTeam(team, currentFilter) {
   const list = currentFilter === '__ALL__' ? team.slice() : team.filter((m) => m.team === currentFilter);
   return list.sort((a, b) => b.pct - a.pct);

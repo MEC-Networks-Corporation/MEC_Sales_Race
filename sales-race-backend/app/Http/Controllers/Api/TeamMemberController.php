@@ -13,9 +13,10 @@ use Illuminate\Support\Facades\DB;
 class TeamMemberController extends Controller
 {
     // Public — the display page and admin login screen both need this without auth.
+    // Only ever shows the published ("live") roster, never the admin's draft.
     public function index()
     {
-        $team = TeamMember::orderBy('sort_order')->orderBy('id')->get()
+        $team = TeamMember::live()->orderBy('sort_order')->orderBy('id')->get()
             ->map(fn (TeamMember $m) => $m->toRace());
 
         $setting = RaceSetting::current();
@@ -26,7 +27,35 @@ class TeamMemberController extends Controller
         ]);
     }
 
-    // Admin only (see routes/api.php) below this line.
+    // Admin only (see routes/api.php) below this line. Everything here reads
+    // and writes the "draft" roster — none of it reaches the TV until publish().
+
+    // Admin's editor view. The draft roster is seeded from live the first
+    // time an admin ever opens the editor (or right after a publish). Once
+    // the draft has been initialized, it's never auto-reseeded again — even
+    // if the admin empties it via "clear all" — so an intentional empty
+    // roster survives a page reload.
+    public function draftIndex()
+    {
+        $setting = RaceSetting::current();
+
+        if ($setting->draft_initialized_at === null) {
+            $this->seedDraftFromLive();
+            $setting->update([
+                'draft_quarter' => $setting->quarter,
+                'draft_year' => $setting->year,
+                'draft_initialized_at' => now(),
+            ]);
+        }
+
+        $team = TeamMember::draft()->orderBy('sort_order')->orderBy('id')->get()
+            ->map(fn (TeamMember $m) => $m->toRace());
+
+        return response()->json([
+            'team' => $team,
+            'period' => ['quarter' => $setting->draft_quarter, 'year' => $setting->draft_year],
+        ]);
+    }
 
     public function store(Request $request)
     {
@@ -39,7 +68,7 @@ class TeamMemberController extends Controller
 
         TeamSnapshot::capture();
 
-        $maxSort = TeamMember::max('sort_order') ?? 0;
+        $maxSort = TeamMember::draft()->max('sort_order') ?? 0;
 
         $member = TeamMember::create([
             'name' => $data['name'],
@@ -47,9 +76,8 @@ class TeamMemberController extends Controller
             'pct' => $data['pct'] ?? 0,
             'color' => $data['color'] ?? '#2d8cff',
             'sort_order' => $maxSort + 1,
+            'status' => 'draft',
         ]);
-
-        broadcast(new TeamUpdated());
 
         return response()->json(['member' => $member->toRace()], 201);
     }
@@ -67,8 +95,6 @@ class TeamMemberController extends Controller
 
         $teamMember->update($data);
 
-        broadcast(new TeamUpdated());
-
         return response()->json(['member' => $teamMember->toRace()]);
     }
 
@@ -82,8 +108,6 @@ class TeamMemberController extends Controller
         // acceptable trade-off for a small internal tool.
         $teamMember->delete();
 
-        broadcast(new TeamUpdated());
-
         return response()->json(['ok' => true]);
     }
 
@@ -91,9 +115,7 @@ class TeamMemberController extends Controller
     {
         TeamSnapshot::capture();
 
-        TeamMember::query()->delete();
-
-        broadcast(new TeamUpdated());
+        TeamMember::draft()->delete();
 
         return response()->json(['ok' => true]);
     }
@@ -114,10 +136,10 @@ class TeamMemberController extends Controller
         TeamSnapshot::capture();
 
         if ($data['mode'] === 'replace') {
-            TeamMember::query()->delete();
+            TeamMember::draft()->delete();
         }
 
-        $maxSort = TeamMember::max('sort_order') ?? 0;
+        $maxSort = TeamMember::draft()->max('sort_order') ?? 0;
         $palette = ['#ff5a3c', '#2d8cff', '#9b5cff', '#27d07a', '#ffb000', '#ff3b9d', '#00c6c0', '#ff7a00'];
 
         foreach ($data['rows'] as $i => $row) {
@@ -128,10 +150,9 @@ class TeamMemberController extends Controller
                 'pct' => $row['pct'] ?? 0,
                 'color' => $row['color'] ?? $palette[$i % count($palette)],
                 'sort_order' => $maxSort,
+                'status' => 'draft',
             ]);
         }
-
-        broadcast(new TeamUpdated());
 
         return response()->json(['ok' => true, 'imported' => count($data['rows'])]);
     }
@@ -139,7 +160,7 @@ class TeamMemberController extends Controller
     public function uploadPhoto(Request $request, TeamMember $teamMember)
     {
         $request->validate([
-            'photo' => ['required', 'image', 'max:5120'], // 5MB
+            'photo' => ['required', 'image', 'max:15360'], // 15MB
         ]);
 
         TeamSnapshot::capture();
@@ -148,12 +169,10 @@ class TeamMemberController extends Controller
         $path = $request->file('photo')->store('team-photos', 'public');
         $teamMember->update(['photo_path' => $path]);
 
-        broadcast(new TeamUpdated());
-
         return response()->json(['member' => $teamMember->fresh()->toRace()]);
     }
 
-    // Reverts the roster to how it looked right before the last mutating
+    // Reverts the draft roster to how it looked right before the last mutating
     // action (add/edit/delete/import/clear/photo). Single level of undo.
     public function undo()
     {
@@ -164,7 +183,7 @@ class TeamMemberController extends Controller
         }
 
         DB::transaction(function () use ($payload) {
-            TeamMember::query()->delete();
+            TeamMember::draft()->delete();
 
             if (! empty($payload)) {
                 DB::table('team_members')->insert($payload);
@@ -173,11 +192,99 @@ class TeamMemberController extends Controller
             TeamSnapshot::clear();
         });
 
-        broadcast(new TeamUpdated());
-
-        $team = TeamMember::orderBy('sort_order')->orderBy('id')->get()
+        $team = TeamMember::draft()->orderBy('sort_order')->orderBy('id')->get()
             ->map(fn (TeamMember $m) => $m->toRace());
 
         return response()->json(['ok' => true, 'team' => $team]);
+    }
+
+    // Publishes the draft roster + period to the TV. Draft rows that were
+    // seeded from a live row (live_id set) update that row in place, so
+    // published ids — and RaceTrack's per-racer animation state — stay
+    // stable across publishes. Brand-new draft rows become new live rows;
+    // live rows with no corresponding draft row are removed.
+    public function publish()
+    {
+        DB::transaction(function () {
+            $draftRows = TeamMember::draft()->orderBy('sort_order')->orderBy('id')->get();
+            $keepLiveIds = [];
+
+            foreach ($draftRows as $draft) {
+                $matchesExistingLive = $draft->live_id
+                    && TeamMember::live()->where('id', $draft->live_id)->exists();
+
+                if ($matchesExistingLive) {
+                    TeamMember::live()->where('id', $draft->live_id)->update([
+                        'name' => $draft->name,
+                        'team' => $draft->team,
+                        'pct' => $draft->pct,
+                        'color' => $draft->color,
+                        'photo_path' => $draft->photo_path,
+                        'sort_order' => $draft->sort_order,
+                    ]);
+                    $keepLiveIds[] = $draft->live_id;
+                } else {
+                    $newLive = TeamMember::create([
+                        'name' => $draft->name,
+                        'team' => $draft->team,
+                        'pct' => $draft->pct,
+                        'color' => $draft->color,
+                        'photo_path' => $draft->photo_path,
+                        'sort_order' => $draft->sort_order,
+                        'status' => 'live',
+                    ]);
+                    $keepLiveIds[] = $newLive->id;
+                }
+            }
+
+            TeamMember::live()->whereNotIn('id', $keepLiveIds)->delete();
+
+            TeamMember::draft()->delete();
+            $this->seedDraftFromLive();
+
+            $setting = RaceSetting::current();
+            if ($setting->draft_quarter !== null) {
+                $setting->update([
+                    'quarter' => $setting->draft_quarter,
+                    'year' => $setting->draft_year,
+                ]);
+            }
+
+            TeamSnapshot::clear();
+        });
+
+        // The publish itself already succeeded in the DB — don't fail the
+        // whole request just because the Reverb websocket server isn't
+        // reachable. The TV will still pick up the new roster on its next
+        // page load; it just won't update live without Reverb running.
+        try {
+            broadcast(new TeamUpdated());
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    // Clones the current live roster into fresh draft rows so the admin
+    // always has a draft to edit, seeded from whatever's on the TV. Each
+    // draft row remembers which live row it came from (live_id) so a later
+    // publish() can update that same live row instead of replacing it.
+    private function seedDraftFromLive(): void
+    {
+        $liveRows = TeamMember::live()->orderBy('sort_order')->orderBy('id')->get();
+
+        foreach ($liveRows as $row) {
+            TeamMember::create([
+                'name' => $row->name,
+                'team' => $row->team,
+                'pct' => $row->pct,
+                'color' => $row->color,
+                'photo_path' => $row->photo_path,
+                'sort_order' => $row->sort_order,
+                'live_id' => $row->id,
+                'status' => 'draft',
+            ]);
+        }
     }
 }

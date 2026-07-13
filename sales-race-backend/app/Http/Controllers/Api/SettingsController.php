@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Events\TeamUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\RaceSetting;
 use Illuminate\Http\Request;
 
 class SettingsController extends Controller
 {
-    // Admin only (see routes/api.php).
+    // Admin only (see routes/api.php). Stages the quarter/year as a draft —
+    // it only reaches the TV once the admin publishes.
     public function update(Request $request)
     {
         $data = $request->validate([
@@ -18,11 +18,8 @@ class SettingsController extends Controller
         ]);
 
         $setting = RaceSetting::current();
-        $setting->update($data);
+        $setting->update(['draft_quarter' => $data['quarter'], 'draft_year' => $data['year']]);
 
-        // Broadcast so the public display picks up the new quarter/year live.
-        broadcast(new TeamUpdated());
-
-        return response()->json(['period' => ['quarter' => $setting->quarter, 'year' => $setting->year]]);
+        return response()->json(['period' => ['quarter' => $setting->draft_quarter, 'year' => $setting->draft_year]]);
     }
 }

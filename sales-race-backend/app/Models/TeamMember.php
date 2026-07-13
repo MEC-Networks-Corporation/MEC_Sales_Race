@@ -17,7 +17,21 @@ class TeamMember extends Model
         'color',
         'photo_path',
         'sort_order',
+        'status',
+        'live_id',
     ];
+
+    /** Rows currently shown on the public display / TV. */
+    public function scopeLive($query)
+    {
+        return $query->where('status', 'live');
+    }
+
+    /** Rows the admin is editing — not visible on the TV until published. */
+    public function scopeDraft($query)
+    {
+        return $query->where('status', 'draft');
+    }
 
     protected $appends = ['photo_url'];
 

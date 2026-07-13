@@ -41,6 +41,8 @@ async function request(path, { method = 'GET', body, isForm = false } = {}) {
 
 export const api = {
   getTeam: () => request('/team'),
+  getDraftTeam: () => request('/team-members/draft'),
+  publish: () => request('/publish', { method: 'POST' }),
   login: (email, password) => request('/login', { method: 'POST', body: { email, password } }),
   logout: () => request('/logout', { method: 'POST' }),
   me: () => request('/me'),

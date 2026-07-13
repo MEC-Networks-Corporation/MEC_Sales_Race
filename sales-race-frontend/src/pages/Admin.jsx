@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, setToken } from '../lib/api';
-import { subscribeToRaceUpdates } from '../lib/echo';
 import { PALETTE, downloadTemplate, exportRoster, parseCSV } from '../lib/track';
 
 export default function Admin() {
@@ -45,6 +44,9 @@ function Login({ onLoggedIn }) {
     <div className="wrap" style={{ maxWidth: 420 }}>
       <div className="banner">
         <div className="checker" />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px 0' }}>
+          <Link to="/" className="btn-tv">🏁 View Race</Link>
+        </div>
         <h1 style={{ fontSize: 32 }}>Admin Login</h1>
         <div className="sub">Race to Quota</div>
       </div>
@@ -80,26 +82,34 @@ function Editor({ user, onLogout }) {
   const [undoBusy, setUndoBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [modal, setModal] = useState(null); // {title, body, actions:[{label,onClick,danger}]}
+  const [dirty, setDirty] = useState(false); // true if there are draft changes not yet on the TV
+  const [publishBusy, setPublishBusy] = useState(false);
   const fileInputRef = useRef(null);
   const photoInputsRef = useRef({});
   const saveTimers = useRef({});
   const rowsContainerRef = useRef(null);
 
   useEffect(() => {
-    api.getTeam().then((data) => {
+    api.getDraftTeam().then((data) => {
       setTeam(data.team || []);
       setPeriod(data.period || null);
       setLoaded(true);
-      setSyncNote('☁️ Synced — changes go live instantly');
+      setSyncNote('📝 Editing draft — click Publish to update the TV');
     });
-
-    const unsubscribe = subscribeToRaceUpdates((newTeam, newPeriod) => {
-      const isTyping = document.activeElement && rowsContainerRef.current?.contains(document.activeElement);
-      if (!isTyping) setTeam(newTeam);
-      if (newPeriod) setPeriod(newPeriod);
-    });
-    return unsubscribe;
   }, []);
+
+  async function publish() {
+    setPublishBusy(true);
+    try {
+      await api.publish();
+      setDirty(false);
+      setSyncNote('📺 Published — the TV is now showing this roster');
+    } catch (e) {
+      setSyncNote('⚠️ Could not publish — check your connection.');
+    } finally {
+      setPublishBusy(false);
+    }
+  }
 
   async function updatePeriod(patch) {
     const next = { ...period, ...patch };
@@ -108,6 +118,7 @@ function Editor({ user, onLogout }) {
     try {
       const { period: saved } = await api.updateSettings(next.quarter, next.year);
       setPeriod(saved);
+      setDirty(true);
     } catch (e) {
       setSyncNote('⚠️ Could not save the quarter/year — check your connection.');
     } finally {
@@ -121,6 +132,7 @@ function Editor({ user, onLogout }) {
       try {
         await api.updateMember(id, patch);
         setUndoLabel(label);
+        setDirty(true);
       } catch (e) {
         setSyncNote('⚠️ Could not save a change — check your connection.');
       }
@@ -144,6 +156,7 @@ function Editor({ user, onLogout }) {
       });
       setTeam((prev) => [...prev, member]);
       setUndoLabel('added a teammate');
+      setDirty(true);
       setTimeout(() => {
         const inputs = rowsContainerRef.current?.querySelectorAll('input[data-field="name"]');
         const last = inputs?.[inputs.length - 1];
@@ -161,6 +174,7 @@ function Editor({ user, onLogout }) {
     try {
       await api.deleteMember(id);
       setUndoLabel(`removed ${removed?.name || 'a teammate'}`);
+      setDirty(true);
     } catch (e) {
       setSyncNote('⚠️ Could not remove teammate — check your connection.');
     }
@@ -172,6 +186,7 @@ function Editor({ user, onLogout }) {
       const data = await api.undoLastChange();
       setTeam(data.team || []);
       setUndoLabel(null);
+      setDirty(true);
       setSyncNote('↩️ Last change undone');
     } catch (e) {
       setSyncNote(e.status === 409 ? 'Nothing left to undo.' : '⚠️ Could not undo — check your connection.');
@@ -193,6 +208,7 @@ function Editor({ user, onLogout }) {
           try {
             await api.clearAll();
             setUndoLabel('cleared the roster');
+            setDirty(true);
           } catch (e) { setSyncNote('⚠️ Could not clear roster — check your connection.'); }
         } },
       ],
@@ -205,6 +221,7 @@ function Editor({ user, onLogout }) {
       const { member } = await api.uploadPhoto(id, file);
       setTeam((prev) => prev.map((m) => (m.id === id ? member : m)));
       setUndoLabel(`changed ${member.name || 'a teammate'}'s photo`);
+      setDirty(true);
     } catch (e) {
       setSyncNote('⚠️ Photo upload failed — check the file is an image under 5MB.');
     }
@@ -213,9 +230,10 @@ function Editor({ user, onLogout }) {
   async function commitImport(rows, mode) {
     try {
       await api.importRows(rows, mode);
-      const data = await api.getTeam();
+      const data = await api.getDraftTeam();
       setTeam(data.team || []);
       setUndoLabel(`imported ${rows.length} teammate${rows.length === 1 ? '' : 's'}`);
+      setDirty(true);
       setSyncNote(`Imported ${rows.length} teammate${rows.length === 1 ? '' : 's'}${mode === 'merge' ? ' (added to existing roster)' : ''} 🎉`);
     } catch (e) {
       setSyncNote('⚠️ Import failed — check your connection.');
@@ -272,11 +290,22 @@ function Editor({ user, onLogout }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           <h2 style={{ margin: 0 }}>Your Team</h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link to="/" className="btn-tv">🏁 View Race</Link>
             <Link to="/admin/users" className="btn-tv">👤 Manage Admins</Link>
             <button className="btn-tv" onClick={handleLogout}>Log out</button>
           </div>
         </div>
-        <p className="savenote" id="saveNote">{syncNote}</p>
+        <p className="savenote" id="saveNote" style={{ marginTop: 18 }}>{syncNote}</p>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+          <button
+            className="add"
+            onClick={publish}
+            disabled={publishBusy || !loaded}
+            style={dirty ? { boxShadow: '0 0 0 3px #ffb00066' } : undefined}
+          >
+            {publishBusy ? 'Publishing…' : dirty ? '📺 Publish to TV — unpublished changes' : '📺 Publish to TV'}
+          </button>
+        </div>
         {undoLabel && (
           <p className="savenote" style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center' }}>
             You {undoLabel}.

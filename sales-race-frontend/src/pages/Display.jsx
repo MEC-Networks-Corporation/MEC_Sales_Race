@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import RaceTrack from '../components/RaceTrack';
 import { api } from '../lib/api';
 import { subscribeToRaceUpdates } from '../lib/echo';
@@ -80,6 +81,9 @@ export default function Display() {
     <div className="wrap">
       <div className="banner">
         <div className="checker" />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px 0' }}>
+          <Link to="/admin" className="btn-tv">🔑 Admin Login</Link>
+        </div>
         <h1>Race to Quota</h1>
         <div className="sub">🏁 The push to 100% (and beyond) 🏁</div>
         {period && <div className="period">Q{period.quarter} {period.year}</div>}

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { adaptSizing, carSVG, initials, leftFor, tierFor, visibleTeam } from '../lib/track';
+import { adaptSizing, initials, leftFor, tierFor, vehicleSVG, visibleTeam } from '../lib/track';
 
 // Builds the persistent DOM structure for one racer. Only created once per
 // member id — later updates mutate this in place instead of rebuilding it, so
@@ -78,7 +78,7 @@ function paintContent(entry, m, rank) {
   if (m.photo) { entry.faceEl.style.backgroundImage = `url('${m.photo}')`; entry.faceEl.textContent = ''; }
   else { entry.faceEl.style.backgroundImage = ''; entry.faceEl.textContent = initials(m.name); }
 
-  entry.carEl.innerHTML = carSVG(m.color);
+  entry.carEl.innerHTML = vehicleSVG(m.color);
 }
 
 function animateTo(entry, pct) {

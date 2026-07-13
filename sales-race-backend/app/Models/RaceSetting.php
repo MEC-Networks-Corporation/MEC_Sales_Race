@@ -6,13 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 class RaceSetting extends Model
 {
-    protected $fillable = ['quarter', 'year'];
+    protected $fillable = ['quarter', 'year', 'draft_quarter', 'draft_year', 'draft_initialized_at'];
 
     protected function casts(): array
     {
         return [
             'quarter' => 'integer',
             'year' => 'integer',
+            'draft_quarter' => 'integer',
+            'draft_year' => 'integer',
+            'draft_initialized_at' => 'datetime',
         ];
     }
 

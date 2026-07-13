@@ -10,11 +10,10 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Fired after every create/update/delete/import (and settings change) so both
- * the public display and every open admin tab receive the new roster and
- * period immediately over the public "race" channel. ShouldBroadcastNow means
- * this sends synchronously — no queue worker needs to be running for
- * real-time updates to work.
+ * Fired when the admin publishes their draft, so the public display picks up
+ * the newly-live roster and period immediately over the public "race"
+ * channel. ShouldBroadcastNow means this sends synchronously — no queue
+ * worker needs to be running for the TV to update live.
  */
 class TeamUpdated implements ShouldBroadcastNow
 {
@@ -26,7 +25,7 @@ class TeamUpdated implements ShouldBroadcastNow
 
     public function __construct()
     {
-        $this->team = TeamMember::orderBy('sort_order')->orderBy('id')->get()
+        $this->team = TeamMember::live()->orderBy('sort_order')->orderBy('id')->get()
             ->map(fn (TeamMember $member) => $member->toRace())
             ->values()
             ->all();

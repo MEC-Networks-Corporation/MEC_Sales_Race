@@ -19,12 +19,13 @@ class TeamSnapshot extends Model
         return static::firstOrCreate(['id' => 1]);
     }
 
-    /** Overwrites the buffer with the current roster, right before a mutation. */
+    /** Overwrites the buffer with the current draft roster, right before a mutation. */
     public static function capture(): void
     {
-        $rows = TeamMember::orderBy('sort_order')->orderBy('id')->get()
+        $rows = TeamMember::draft()->orderBy('sort_order')->orderBy('id')->get()
             ->map(fn (TeamMember $m) => $m->only([
-                'id', 'name', 'team', 'pct', 'color', 'photo_path', 'sort_order', 'created_at', 'updated_at',
+                'id', 'name', 'team', 'pct', 'color', 'photo_path', 'sort_order', 'status',
+                'live_id', 'created_at', 'updated_at',
             ]))
             ->all();
 
