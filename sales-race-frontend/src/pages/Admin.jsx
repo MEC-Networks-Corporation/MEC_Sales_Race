@@ -66,6 +66,11 @@ function Login({ onLoggedIn }) {
   );
 }
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 const inputStyle = {
   width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ccc',
   fontFamily: 'Outfit, sans-serif', fontSize: 14, boxSizing: 'border-box',
@@ -116,11 +121,11 @@ function Editor({ user, onLogout }) {
     setPeriod(next);
     setPeriodBusy(true);
     try {
-      const { period: saved } = await api.updateSettings(next.quarter, next.year);
+      const { period: saved } = await api.updateSettings(next.period_type, next.quarter, next.month, next.year);
       setPeriod(saved);
       setDirty(true);
     } catch (e) {
-      setSyncNote('⚠️ Could not save the quarter/year — check your connection.');
+      setSyncNote('⚠️ Could not save the period — check your connection.');
     } finally {
       setPeriodBusy(false);
     }
@@ -318,16 +323,42 @@ function Editor({ user, onLogout }) {
         <div className="sectionlabel">Period</div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
           <label style={{ fontWeight: 800, fontSize: 13 }}>
-            Quarter{' '}
+            Basis{' '}
             <select
-              value={period?.quarter ?? ''}
+              value={period?.period_type ?? 'quarter'}
               disabled={!period || periodBusy}
-              onChange={(e) => updatePeriod({ quarter: parseInt(e.target.value, 10) })}
+              onChange={(e) => updatePeriod({ period_type: e.target.value })}
               style={{ ...inputStyle, width: 'auto', display: 'inline-block' }}
             >
-              {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+              <option value="quarter">Quarterly</option>
+              <option value="month">Monthly</option>
             </select>
           </label>
+          {(period?.period_type ?? 'quarter') === 'quarter' ? (
+            <label style={{ fontWeight: 800, fontSize: 13 }}>
+              Quarter{' '}
+              <select
+                value={period?.quarter ?? ''}
+                disabled={!period || periodBusy}
+                onChange={(e) => updatePeriod({ quarter: parseInt(e.target.value, 10) })}
+                style={{ ...inputStyle, width: 'auto', display: 'inline-block' }}
+              >
+                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+              </select>
+            </label>
+          ) : (
+            <label style={{ fontWeight: 800, fontSize: 13 }}>
+              Month{' '}
+              <select
+                value={period?.month ?? ''}
+                disabled={!period || periodBusy}
+                onChange={(e) => updatePeriod({ month: parseInt(e.target.value, 10) })}
+                style={{ ...inputStyle, width: 'auto', display: 'inline-block' }}
+              >
+                {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
+              </select>
+            </label>
+          )}
           <label style={{ fontWeight: 800, fontSize: 13 }}>
             Year{' '}
             <input

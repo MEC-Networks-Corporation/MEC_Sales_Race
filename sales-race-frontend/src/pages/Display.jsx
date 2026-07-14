@@ -9,6 +9,19 @@ const SCROLL_PX_PER_TICK = 1.1; // ~33px/sec
 const SCROLL_TICK_MS = 30;
 const SCROLL_PAUSE_MS = 2600; // dwell time at top/bottom
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+function periodLabel(period) {
+  if (!period) return null;
+  if (period.period_type === 'month') {
+    return `${MONTH_NAMES[(period.month ?? 1) - 1]} ${period.year}`;
+  }
+  return `Q${period.quarter} ${period.year}`;
+}
+
 export default function Display() {
   const [team, setTeam] = useState([]);
   const [period, setPeriod] = useState(null);
@@ -86,7 +99,7 @@ export default function Display() {
         </div>
         <h1>Race to Quota</h1>
         <div className="sub">🏁 The push to 100% (and beyond) 🏁</div>
-        {period && <div className="period">Q{period.quarter} {period.year}</div>}
+        {period && <div className="period">{periodLabel(period)}</div>}
       </div>
 
       {loaded && loadError && (

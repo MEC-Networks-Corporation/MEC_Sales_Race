@@ -23,7 +23,12 @@ class TeamMemberController extends Controller
 
         return response()->json([
             'team' => $team,
-            'period' => ['quarter' => $setting->quarter, 'year' => $setting->year],
+            'period' => [
+                'period_type' => $setting->period_type,
+                'quarter' => $setting->quarter,
+                'month' => $setting->month,
+                'year' => $setting->year,
+            ],
         ]);
     }
 
@@ -42,18 +47,32 @@ class TeamMemberController extends Controller
         if ($setting->draft_initialized_at === null) {
             $this->seedDraftFromLive();
             $setting->update([
+                'draft_period_type' => $setting->period_type,
                 'draft_quarter' => $setting->quarter,
+                'draft_month' => $setting->month,
                 'draft_year' => $setting->year,
                 'draft_initialized_at' => now(),
             ]);
         }
+
+        // Rows created before period_type existed have draft_initialized_at
+        // already set, so the seed-on-first-open block above never ran for
+        // them and draft_period_type/draft_month can still be null — fall
+        // back to the live values so the admin form always has a basis.
+        $draftPeriodType = $setting->draft_period_type ?? $setting->period_type ?? 'quarter';
+        $draftMonth = $setting->draft_month ?? $setting->month;
 
         $team = TeamMember::draft()->orderBy('sort_order')->orderBy('id')->get()
             ->map(fn (TeamMember $m) => $m->toRace());
 
         return response()->json([
             'team' => $team,
-            'period' => ['quarter' => $setting->draft_quarter, 'year' => $setting->draft_year],
+            'period' => [
+                'period_type' => $draftPeriodType,
+                'quarter' => $setting->draft_quarter,
+                'month' => $draftMonth,
+                'year' => $setting->draft_year,
+            ],
         ]);
     }
 
@@ -243,9 +262,11 @@ class TeamMemberController extends Controller
             $this->seedDraftFromLive();
 
             $setting = RaceSetting::current();
-            if ($setting->draft_quarter !== null) {
+            if ($setting->draft_period_type !== null) {
                 $setting->update([
+                    'period_type' => $setting->draft_period_type,
                     'quarter' => $setting->draft_quarter,
+                    'month' => $setting->draft_month,
                     'year' => $setting->draft_year,
                 ]);
             }
