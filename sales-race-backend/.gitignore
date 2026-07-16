@@ -1,3 +1,4 @@
 .env
+/database/database.sqlite
 storage/app/public/team-photos/*
 !storage/app/public/team-photos/.gitkeep

@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Route;
 
 // --- Public: the display board and the admin login screen both need this ---
 Route::get('/team', [TeamMemberController::class, 'index']);
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:6,1');
 
 // --- Admin only (Sanctum bearer token, see AuthController::login) ---
 Route::middleware('auth:sanctum')->group(function () {

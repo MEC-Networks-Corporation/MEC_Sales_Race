@@ -119,8 +119,9 @@ export default function RaceTrack({ team, currentFilter }) {
         statsEl.innerHTML = `
           <div class="stat"><div class="stat-num">${avg}%</div><div class="stat-label">Team Average</div></div>
           <div class="stat"><div class="stat-num ${overCount > 0 ? 'gold' : ''}">${overCount}/${list.length}</div><div class="stat-label">Over Quota</div></div>
-          <div class="stat"><div class="stat-num">${leader.pct}%</div><div class="stat-label">🥇 ${leader.name || 'Leader'}</div></div>
+          <div class="stat"><div class="stat-num">${leader.pct}%</div><div class="stat-label">🥇 <span data-leader-name></span></div></div>
         `;
+        statsEl.querySelector('[data-leader-name]').textContent = leader.name || 'Leader';
       }
     }
 
