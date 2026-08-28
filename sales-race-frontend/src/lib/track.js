@@ -23,10 +23,21 @@ export function initials(n) {
 }
 
 export function adaptSizing(n) {
-  if (n <= 8) return { head: '88px', lane: '132px', scale: 1 };
-  if (n <= 16) return { head: '62px', lane: '102px', scale: 0.82 };
-  if (n <= 26) return { head: '48px', lane: '80px', scale: 0.66 };
-  return { head: '38px', lane: '64px', scale: 0.55 };
+  // Smooth continuous scaling — no hard jumps between breakpoints.
+  // t ramps from 0 (≤5 people) to 1 (≥20 people).
+  const t = Math.min(1, Math.max(0, (n - 5) / 15));
+
+  // Head (face circle): 88 px → 42 px
+  const head = Math.round(88 - t * 46);
+
+  // Lane height: 134 px → 82 px, with a floor so the pct badge
+  // (positioned above the racer centre) doesn't collide with the name plate.
+  const lane = Math.max(Math.round(134 - t * 52), head + 68);
+
+  // Car scale: always full size for readability.
+  const scale = 1;
+
+  return { head: head + 'px', lane: lane + 'px', scale };
 }
 
 export function carSVG(color) {

@@ -1,175 +1,115 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion, LayoutGroup } from 'framer-motion';
 import { adaptSizing, initials, leftFor, tierFor, vehicleSVG, visibleTeam } from '../lib/track';
 
-// Builds the persistent DOM structure for one racer. Only created once per
-// member id — later updates mutate this in place instead of rebuilding it, so
-// unrelated racers never get touched (and never re-animate) when one teammate
-// changes.
-function createLaneEntry(startAtLeft) {
-  const laneEl = document.createElement('div');
-  laneEl.className = 'lane';
-
-  const racerEl = document.createElement('div');
-  racerEl.className = 'racer';
-  racerEl.style.left = startAtLeft;
-
-  const speedEl = document.createElement('div');
-  speedEl.className = 'speed';
-  speedEl.innerHTML = '<i></i><i></i><i></i>';
-
-  const puffEl = document.createElement('div');
-  puffEl.className = 'puff';
-
-  const crownEl = document.createElement('div');
-  crownEl.className = 'crown';
-  crownEl.style.display = 'none';
-
-  const pctEl = document.createElement('div');
-  pctEl.className = 'pct';
-
-  const carwrapEl = document.createElement('div');
-  carwrapEl.className = 'carwrap';
-
-  const faceEl = document.createElement('div');
-  faceEl.className = 'face';
-
-  const carEl = document.createElement('div');
-  carEl.className = 'car';
-
-  const plateEl = document.createElement('div');
-  plateEl.className = 'plate';
-
-  const rankEl = document.createElement('span');
-  rankEl.className = 'rank';
-
-  const nmEl = document.createElement('span');
-  nmEl.className = 'nm';
-
-  const tmEl = document.createElement('span');
-  tmEl.className = 'tm';
-  tmEl.style.display = 'none';
-
-  plateEl.append(rankEl, nmEl, tmEl);
-  carwrapEl.append(faceEl, carEl, plateEl);
-  racerEl.append(speedEl, puffEl, crownEl, pctEl, carwrapEl);
-  laneEl.append(racerEl);
-
-  return { laneEl, racerEl, crownEl, pctEl, puffEl, faceEl, carEl, rankEl, nmEl, tmEl, snapshot: null };
-}
-
-function paintContent(entry, m, rank) {
+function Lane({ m, rank }) {
   const tier = tierFor(m.pct);
-  entry.racerEl.classList.toggle('mvp', tier === 'mvp');
-  entry.pctEl.className = 'pct ' + tier;
-  entry.pctEl.textContent = tier === 'mvp' ? `🔥 ${m.pct}%` : `${m.pct}%`;
-  entry.puffEl.textContent = m.pct >= 100 ? '🔥' : '💨';
+  const isFirst = rank === 0 && m.pct >= 100;
+  const [racing, setRacing] = useState(false);
+  const prevPctRef = useRef(m.pct);
 
-  const rankClass = rank === 0 ? 'g1' : rank === 1 ? 'g2' : rank === 2 ? 'g3' : '';
-  entry.rankEl.className = 'rank ' + rankClass;
-  entry.rankEl.textContent = `#${rank + 1}`;
-  entry.nmEl.textContent = m.name || '—';
-
-  if (m.team) { entry.tmEl.style.display = ''; entry.tmEl.textContent = m.team; }
-  else { entry.tmEl.style.display = 'none'; }
-
-  if (rank === 0 && m.pct >= 100) { entry.crownEl.style.display = ''; entry.crownEl.textContent = tier === 'mvp' ? '👑' : '🏆'; }
-  else { entry.crownEl.style.display = 'none'; }
-
-  if (m.photo) { entry.faceEl.style.backgroundImage = `url('${m.photo}')`; entry.faceEl.textContent = ''; }
-  else { entry.faceEl.style.backgroundImage = ''; entry.faceEl.textContent = initials(m.name); }
-
-  entry.carEl.innerHTML = vehicleSVG(m.color);
-}
-
-function animateTo(entry, pct) {
-  entry.racerEl.classList.add('racing');
-  void entry.racerEl.offsetWidth; // force reflow so the transition kicks in
-  requestAnimationFrame(() => setTimeout(() => { entry.racerEl.style.left = leftFor(pct) + '%'; }, 60));
-  setTimeout(() => entry.racerEl.classList.remove('racing'), 2700);
-}
-
-export default function RaceTrack({ team, currentFilter }) {
-  const trackRef = useRef(null);
-  const statsRef = useRef(null);
-  const lanesRef = useRef(new Map()); // member id -> lane entry, persists across renders
-
+  // Trigger the racing animation (speed lines + puff) when pct changes.
   useEffect(() => {
-    const trackEl = trackRef.current;
+    if (m.pct !== prevPctRef.current) {
+      prevPctRef.current = m.pct;
+      setRacing(true);
+      const t = setTimeout(() => setRacing(false), 2700);
+      return () => clearTimeout(t);
+    }
+  }, [m.pct]);
+
+  return (
+    <motion.div
+      layout
+      layoutId={`lane-${m.id}`}
+      className="lane"
+      transition={{ type: 'spring', stiffness: 260, damping: 28 }}
+    >
+      <motion.div
+        className={`racer ${tier === 'mvp' ? 'mvp' : ''} ${racing ? 'racing' : ''}`}
+        animate={{ left: leftFor(m.pct) + '%' }}
+        transition={{ duration: 2.6, ease: [0.22, 0.61, 0.36, 1] }}
+      >
+        <div className="speed"><i /><i /><i /></div>
+        <div className="puff">{m.pct >= 100 ? '🔥' : '💨'}</div>
+        <div className="crown" style={{ display: isFirst ? '' : 'none' }}>
+          {tier === 'mvp' ? '👑' : '🏆'}
+        </div>
+        <motion.div
+          className={`pct ${tier}`}
+          key={`pct-${m.id}-${tier}`}
+          initial={false}
+          animate={{ scale: [1, 1.3, 1] }}
+          transition={{ duration: 0.4 }}
+        >
+          {tier === 'mvp' ? `🔥 ${m.pct}%` : `${m.pct}%`}
+        </motion.div>
+        <div className="carwrap">
+          <div
+            className="face"
+            style={m.photo ? { backgroundImage: `url('${m.photo}')` } : undefined}
+          >
+            {!m.photo && initials(m.name)}
+          </div>
+          <div className="car" dangerouslySetInnerHTML={{ __html: vehicleSVG(m.color) }} />
+          <div className="plate">
+            <span className={`rank ${rank === 0 ? 'g1' : rank === 1 ? 'g2' : rank === 2 ? 'g3' : ''}`}>
+              #{rank + 1}
+            </span>
+            <span className="nm">{m.name || '—'}</span>
+            {m.team && <span className="tm">{m.team}</span>}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+const FIXED_HEIGHT_LANES = 4; // lanes visible when track is fixed in TV mode
+
+export default function RaceTrack({ team, currentFilter, isTV }) {
+  const statsRef = useRef(null);
+  const list = useMemo(() => visibleTeam(team, currentFilter), [team, currentFilter]);
+  const { head, lane, scale } = adaptSizing(list.length);
+  const useFixedTrack = isTV && list.length > FIXED_HEIGHT_LANES + 1;
+
+  // Stats bar
+  useEffect(() => {
     const statsEl = statsRef.current;
-    if (!trackEl) return;
-
-    const list = visibleTeam(team, currentFilter);
-
-    // Size lanes based on roster length, same breakpoints as the original.
-    const { head, lane, scale } = adaptSizing(list.length);
-    const root = document.documentElement.style;
-    root.setProperty('--head', head);
-    root.setProperty('--lane', lane);
-    root.setProperty('--carscale', scale);
-
-    // Stats bar
-    if (statsEl) {
-      if (!list.length) {
-        statsEl.style.display = 'none';
-      } else {
-        const avg = Math.round(list.reduce((s, m) => s + m.pct, 0) / list.length);
-        const overCount = list.filter((m) => m.pct >= 100).length;
-        const leader = list[0];
-        statsEl.style.display = 'flex';
-        statsEl.innerHTML = `
-          <div class="stat"><div class="stat-num">${avg}%</div><div class="stat-label">Team Average</div></div>
-          <div class="stat"><div class="stat-num ${overCount > 0 ? 'gold' : ''}">${overCount}/${list.length}</div><div class="stat-label">Over Quota</div></div>
-          <div class="stat"><div class="stat-num">${leader.pct}%</div><div class="stat-label">🥇 <span data-leader-name></span></div></div>
-        `;
-        statsEl.querySelector('[data-leader-name]').textContent = leader.name || 'Leader';
-      }
+    if (!statsEl) return;
+    if (!list.length) {
+      statsEl.style.display = 'none';
+      return;
     }
-
-    const lanes = lanesRef.current;
-    const seen = new Set();
-
-    list.forEach((m, rank) => {
-      seen.add(m.id);
-      let entry = lanes.get(m.id);
-      const prev = entry?.snapshot;
-
-      if (!entry) {
-        // New teammate — create their lane and drive them in from the start line.
-        entry = createLaneEntry('18px');
-        trackEl.appendChild(entry.laneEl);
-        lanes.set(m.id, entry);
-        paintContent(entry, m, rank);
-        animateTo(entry, m.pct);
-      } else {
-        const pctChanged = !prev || prev.pct !== m.pct;
-        const otherChanged = !prev || prev.name !== m.name || prev.team !== m.team
-          || prev.color !== m.color || prev.photo !== m.photo;
-        const rankChanged = !prev || prev.rank !== rank;
-
-        if (pctChanged || otherChanged || rankChanged) paintContent(entry, m, rank);
-        // Only move the racer whose percentage actually changed — everyone
-        // else keeps their current track position.
-        if (pctChanged) animateTo(entry, m.pct);
-      }
-
-      entry.snapshot = { pct: m.pct, name: m.name, team: m.team, color: m.color, photo: m.photo, rank };
-    });
-
-    // Drop lanes for teammates no longer in the (filtered) list.
-    for (const [id, entry] of lanes) {
-      if (!seen.has(id)) { entry.laneEl.remove(); lanes.delete(id); }
-    }
-
-    // Reorder lane DOM nodes to match current standings. appendChild on an
-    // already-attached node just moves it — it doesn't recreate or restart
-    // any in-flight CSS transition on the racer inside it.
-    list.forEach((m) => trackEl.appendChild(lanes.get(m.id).laneEl));
-  }, [team, currentFilter]);
+    const avg = Math.round(list.reduce((s, m) => s + m.pct, 0) / list.length);
+    const overCount = list.filter((m) => m.pct >= 100).length;
+    const leader = list[0];
+    statsEl.style.display = 'flex';
+    statsEl.innerHTML = `
+      <div class="stat"><div class="stat-num">${avg}%</div><div class="stat-label">Team Average</div></div>
+      <div class="stat"><div class="stat-num ${overCount > 0 ? 'gold' : ''}">${overCount}/${list.length}</div><div class="stat-label">Over Quota</div></div>
+      <div class="stat"><div class="stat-num">${leader.pct}%</div><div class="stat-label">🥇 <span data-leader-name></span></div></div>
+    `;
+    statsEl.querySelector('[data-leader-name]').textContent = leader.name || 'Leader';
+  }, [list]);
 
   return (
     <>
       <div className="statsbar" id="statsBar" ref={statsRef} style={{ display: 'none' }} />
-      <div className="track" id="track" ref={trackRef}>
+      <div
+        className="track"
+        id="track"
+        style={{
+          '--head': head,
+          '--lane': lane,
+          '--carscale': scale,
+          ...(useFixedTrack ? {
+            height: '65vh',
+            overflow: 'hidden',
+          } : {}),
+        }}
+      >
+        {/* Static decorations — stay fixed, never scroll */}
         <div className="startline" />
         <div className="marker" style={{ left: '25%' }}><span>25%</span></div>
         <div className="marker" style={{ left: '50%' }}><span>50%</span></div>
@@ -177,6 +117,28 @@ export default function RaceTrack({ team, currentFilter }) {
         <div className="finishline" />
         <div className="finishflag">100%<br />QUOTA</div>
         <div className="overdrive"><span>OVERDRIVE</span></div>
+
+        {/* Scrollable lane container */}
+        <div
+          className="track-lanes"
+          style={useFixedTrack ? {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            paddingTop: `calc(${head} * 1.35 - ${lane} / 2 + 36px)`,
+            paddingBottom: '18px',
+          } : undefined}
+        >
+          <LayoutGroup>
+            {list.map((m, rank) => (
+              <Lane key={m.id} m={m} rank={rank} />
+            ))}
+          </LayoutGroup>
+        </div>
       </div>
     </>
   );

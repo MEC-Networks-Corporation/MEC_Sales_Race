@@ -58,13 +58,21 @@ export default function Display() {
     autoScroll.current.dir = 1;
     autoScroll.current.pauseUntil = Date.now() + SCROLL_PAUSE_MS;
     autoScroll.current.timer = setInterval(() => {
-      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      // If the track has internal scroll (TV mode, many people), scroll it
+      // instead of the page.
+      // In TV mode the scrollable container is .track-lanes inside #track.
+      const scroller = document.querySelector('.track-lanes');
+      const maxScroll = scroller
+        ? scroller.scrollHeight - scroller.clientHeight
+        : document.documentElement.scrollHeight - window.innerHeight;
       if (maxScroll <= 0) return;
       if (Date.now() < autoScroll.current.pauseUntil) return;
-      let next = window.scrollY + autoScroll.current.dir * SCROLL_PX_PER_TICK;
+      const curScroll = scroller ? scroller.scrollTop : window.scrollY;
+      let next = curScroll + autoScroll.current.dir * SCROLL_PX_PER_TICK;
       if (next >= maxScroll) { next = maxScroll; autoScroll.current.dir = -1; autoScroll.current.pauseUntil = Date.now() + SCROLL_PAUSE_MS; }
       else if (next <= 0) { next = 0; autoScroll.current.dir = 1; autoScroll.current.pauseUntil = Date.now() + SCROLL_PAUSE_MS; }
-      window.scrollTo(0, next);
+      if (scroller) scroller.scrollTop = next;
+      else window.scrollTo(0, next);
     }, SCROLL_TICK_MS);
   }
 
@@ -73,6 +81,9 @@ export default function Display() {
       const active = !!document.fullscreenElement;
       setIsTV(active);
       document.body.classList.toggle('tv-mode', active);
+      // Lock/unlock page scroll — in TV mode only the track scrolls.
+      document.body.style.overflow = active ? 'hidden' : '';
+      document.documentElement.style.overflow = active ? 'hidden' : '';
       if (active) { window.scrollTo(0, 0); setTimeout(startAutoScroll, 400); }
       else { stopAutoScroll(); window.scrollTo({ top: 0 }); }
     };
@@ -95,7 +106,7 @@ export default function Display() {
       <div className="banner">
         <div className="checker" />
         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px 0' }}>
-          <Link to="/admin" className="btn-tv">🔑 Admin Login</Link>
+          {!isTV && <Link to="/admin" className="btn-tv">🔑 Admin Login</Link>}
         </div>
         <h1>Race to Quota</h1>
         <div className="sub">🏁 The push to 100% (and beyond) 🏁</div>
@@ -130,7 +141,7 @@ export default function Display() {
             </select>
           </div>
 
-          <RaceTrack team={team} currentFilter={currentFilter} />
+          <RaceTrack team={team} currentFilter={currentFilter} isTV={isTV} />
 
           <div className="bar">
             <button className="btn-tv" id="tvBtn" onClick={toggleTV}>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { api, setToken } from '../lib/api';
 import { PALETTE, downloadTemplate, exportRoster, parseCSV } from '../lib/track';
@@ -89,6 +90,8 @@ function Editor({ user, onLogout }) {
   const [modal, setModal] = useState(null); // {title, body, actions:[{label,onClick,danger}]}
   const [dirty, setDirty] = useState(false); // true if there are draft changes not yet on the TV
   const [publishBusy, setPublishBusy] = useState(false);
+  const [localEdits, setLocalEdits] = useState({}); // { [memberId]: { pct: ... } }
+  const [importOpen, setImportOpen] = useState(false);
   const fileInputRef = useRef(null);
   const photoInputsRef = useRef({});
   const saveTimers = useRef({});
@@ -96,7 +99,7 @@ function Editor({ user, onLogout }) {
 
   useEffect(() => {
     api.getDraftTeam().then((data) => {
-      setTeam(data.team || []);
+      setTeam((data.team || []).sort((a, b) => (b.pct || 0) - (a.pct || 0)));
       setPeriod(data.period || null);
       setLoaded(true);
       setSyncNote('📝 Editing draft — click Publish to update the TV');
@@ -107,6 +110,11 @@ function Editor({ user, onLogout }) {
     setPublishBusy(true);
     try {
       await api.publish();
+      // Reload the fresh draft (server deletes old draft and re-seeds from live)
+      const data = await api.getDraftTeam();
+      setTeam((data.team || []).sort((a, b) => (b.pct || 0) - (a.pct || 0)));
+      setLocalEdits({}); // clear pending edits — server is now source of truth
+      if (data.period) setPeriod(data.period);
       setDirty(false);
       setSyncNote('📺 Published — the TV is now showing this roster');
     } catch (e) {
@@ -146,7 +154,7 @@ function Editor({ user, onLogout }) {
 
   function updateField(id, field, value) {
     const name = team.find((m) => m.id === id)?.name || 'teammate';
-    setTeam((prev) => prev.map((m) => (m.id === id ? { ...m, [field]: value } : m)));
+    setLocalEdits((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: field === 'pct' ? Math.max(0, Math.min(999, parseInt(value || 0, 10) || 0)) : value } }));
     scheduleSave(
       id,
       { [field]: field === 'pct' ? Math.max(0, Math.min(999, parseInt(value || 0, 10) || 0)) : value },
@@ -173,6 +181,19 @@ function Editor({ user, onLogout }) {
     }
   }
 
+  function confirmRemoveTeammate(id) {
+    const member = team.find((m) => m.id === id);
+    if (!member) return;
+    setModal({
+      title: `Remove ${member.name || 'teammate'}?`,
+      body: `This will remove ${member.name || 'this teammate'} from the draft roster. You can undo it right after with the Undo button.`,
+      actions: [
+        { label: 'Cancel' },
+        { label: 'Remove', danger: true, onClick: () => removeTeammate(id) },
+      ],
+    });
+  }
+
   async function removeTeammate(id) {
     const removed = team.find((m) => m.id === id);
     setTeam((prev) => prev.filter((m) => m.id !== id));
@@ -189,7 +210,8 @@ function Editor({ user, onLogout }) {
     setUndoBusy(true);
     try {
       const data = await api.undoLastChange();
-      setTeam(data.team || []);
+      setTeam((data.team || []).sort((a, b) => (b.pct || 0) - (a.pct || 0)));
+      setLocalEdits({});
       setUndoLabel(null);
       setDirty(true);
       setSyncNote('↩️ Last change undone');
@@ -236,7 +258,8 @@ function Editor({ user, onLogout }) {
     try {
       await api.importRows(rows, mode);
       const data = await api.getDraftTeam();
-      setTeam(data.team || []);
+      setTeam((data.team || []).sort((a, b) => (b.pct || 0) - (a.pct || 0)));
+      setLocalEdits({});
       setUndoLabel(`imported ${rows.length} teammate${rows.length === 1 ? '' : 's'}`);
       setDirty(true);
       setSyncNote(`Imported ${rows.length} teammate${rows.length === 1 ? '' : 's'}${mode === 'merge' ? ' (added to existing roster)' : ''} 🎉`);
@@ -278,7 +301,10 @@ function Editor({ user, onLogout }) {
     onLogout();
   }
 
-  const filtered = team.filter((m) => {
+  // Merge local edits into the team list for display — the array order
+  // (set by the server on publish / load) never changes while editing.
+  const teamWithEdits = team.map((m) => ({ ...m, ...(localEdits[m.id] || {}) }));
+  const filtered = teamWithEdits.filter((m) => {
     const q = search.trim().toLowerCase();
     return !q || (m.name || '').toLowerCase().includes(q) || (m.team || '').toLowerCase().includes(q);
   });
@@ -371,30 +397,46 @@ function Editor({ user, onLogout }) {
           </label>
         </div>
 
-        <div className="sectionlabel">Import teammates</div>
-        <div
-          className={`dropzone${dragOver ? ' drag' : ''}`}
-          tabIndex={0}
-          role="button"
-          aria-label="Upload CSV file"
-          onClick={() => fileInputRef.current?.click()}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) handleCSVFile(f); }}
-        >
-          <span className="dz-icon">📄</span>
-          <div className="dz-main">Drag a CSV file here, or click to browse</div>
-          <div className="dz-sub">Columns: <b>name, team, percentage, color</b> (team and color are optional).</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <button className="btn-edit" onClick={() => setImportOpen((v) => !v)}>
+            {importOpen ? '✕ Close Import' : '📄 Import / Export CSV'}
+          </button>
+          <button className="btn-export" onClick={() => (team.length ? exportRoster(team) : setSyncNote('No teammates to export yet.'))}>⬇ Export roster</button>
+          <button className="btn-clear" onClick={confirmClearAll}>Clear all</button>
         </div>
-        <input ref={fileInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }}
-          onChange={(e) => { if (e.target.files?.[0]) handleCSVFile(e.target.files[0]); e.target.value = ''; }} />
 
-        <div className="csvbar">
-          <button className="btn-tmpl" onClick={downloadTemplate}>⬇ Download CSV template</button>
-          <button className="btn-export" onClick={() => (team.length ? exportRoster(team) : setSyncNote('No teammates to export yet.'))}>⬇ Export current roster</button>
-          <button className="btn-clear" onClick={confirmClearAll}>Clear all teammates</button>
-        </div>
+        <AnimatePresence>
+          {importOpen && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              style={{ overflow: 'hidden' }}
+            >
+              <div className="csvbar" style={{ marginBottom: 8 }}>
+                <button className="btn-tmpl" onClick={downloadTemplate}>⬇ Download CSV template</button>
+              </div>
+              <div
+                className={`dropzone${dragOver ? ' drag' : ''}`}
+                tabIndex={0}
+                role="button"
+                aria-label="Upload CSV file"
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) handleCSVFile(f); }}
+              >
+                <span className="dz-icon">📄</span>
+                <div className="dz-main">Drag a CSV file here, or click to browse</div>
+                <div className="dz-sub">Columns: <b>name, team, percentage, color</b> (team and color are optional).</div>
+              </div>
+              <input ref={fileInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }}
+                onChange={(e) => { if (e.target.files?.[0]) handleCSVFile(e.target.files[0]); e.target.value = ''; }} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="sectionlabel">Teammates</div>
         <div className="searchbar">
@@ -410,10 +452,12 @@ function Editor({ user, onLogout }) {
             {loaded && !filtered.length && (
               <p className="noresults">{team.length ? `No teammates match "${search}"` : 'No teammates yet — add one below or import a CSV above.'}</p>
             )}
-            {filtered.map((m) => (
-              <Row key={m.id} member={m} onChange={updateField} onRemove={removeTeammate}
-                onPhotoPick={handlePhotoPick} photoInputsRef={photoInputsRef} />
-            ))}
+            <LayoutGroup>
+              {filtered.map((m) => (
+                <Row key={m.id} member={m} onChange={updateField} onRemove={confirmRemoveTeammate}
+                  onPhotoPick={handlePhotoPick} photoInputsRef={photoInputsRef} />
+              ))}
+            </LayoutGroup>
           </div>
         </div>
         <button className="add" onClick={addTeammate}>+ Add teammate</button>
@@ -443,7 +487,7 @@ function Row({ member, onChange, onRemove, onPhotoPick, photoInputsRef }) {
   const barWidth = Math.max(0, Math.min(100, member.pct));
 
   return (
-    <div className="row">
+    <motion.div className="row" layout layoutId={`row-${member.id}`} transition={{ type: 'spring', stiffness: 350, damping: 30 }}>
       <div className="avatar" onClick={() => photoInputsRef.current[member.id]?.click()} title="Click to change photo"
         style={member.photo ? { backgroundImage: `url('${member.photo}')` } : undefined}>
         {!member.photo && (member.name || '?').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
@@ -460,6 +504,6 @@ function Row({ member, onChange, onRemove, onPhotoPick, photoInputsRef }) {
       <input type="color" className="colordot" value={member.color || '#2d8cff'}
         onChange={(e) => onChange(member.id, 'color', e.target.value)} />
       <button className="rm" title="Remove" onClick={() => onRemove(member.id)}>✕</button>
-    </div>
+    </motion.div>
   );
 }
