@@ -53,13 +53,13 @@
   .finishline{position:absolute;top:0;bottom:0;width:16px;right:24px;z-index:3;
     background-image:linear-gradient(45deg,#fff 25%,transparent 25%),linear-gradient(-45deg,#fff 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#fff 75%),linear-gradient(-45deg,transparent 75%,#fff 75%);
     background-size:8px 8px;background-color:#111;background-position:0 0,0 4px,4px -4px,-4px 0;}
-  .finishflag{position:absolute;top:6px;right:8px;z-index:4;background:var(--finish);color:#fff;font-family:'Bungee',cursive;font-size:11px;padding:4px 8px;border-radius:6px;transform:rotate(3deg);box-shadow:0 3px 0 #b00;}
+  .finishflag{position:absolute;bottom:8px;right:8px;z-index:4;background:var(--finish);color:#fff;font-family:'Bungee',cursive;font-size:11px;padding:4px 8px;border-radius:6px;transform:rotate(3deg);box-shadow:0 3px 0 #b00;}
   .marker{position:absolute;top:0;bottom:0;width:0;border-left:2px dashed rgba(255,255,255,.28);z-index:2;}
   .marker span{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:800;color:rgba(255,255,255,.55);background:rgba(0,0,0,.25);padding:1px 5px;border-radius:5px;letter-spacing:1px;}
 
   .overdrive{position:absolute;top:0;bottom:0;left:84%;right:0;z-index:1;pointer-events:none;
     background:repeating-linear-gradient(135deg, rgba(255,180,0,.16) 0 12px, rgba(255,180,0,.04) 12px 24px);}
-  .overdrive span{position:absolute;top:8px;right:10px;font-size:9px;font-weight:800;letter-spacing:2px;color:rgba(255,211,77,.65);text-transform:uppercase;writing-mode:vertical-rl;}
+  .overdrive span{position:absolute;bottom:8px;right:10px;font-size:9px;font-weight:800;letter-spacing:2px;color:rgba(255,211,77,.65);text-transform:uppercase;writing-mode:vertical-rl;}
 
   .lane{position:relative;height:var(--lane);}
   .track-lanes::-webkit-scrollbar{width:0;height:0;}

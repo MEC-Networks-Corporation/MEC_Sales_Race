@@ -1,8 +1,37 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { motion, LayoutGroup } from 'framer-motion';
 import { adaptSizing, initials, leftFor, tierFor, vehicleSVG, visibleTeam } from '../lib/track';
 
+/** Smoothly count from one number to another with ease-out curve. */
+function useCountUp(target, duration = 900) {
+  const [display, setDisplay] = useState(target);
+  const fromRef = useRef(target);
+  const frameRef = useRef(null);
+
+  useEffect(() => {
+    const from = fromRef.current;
+    if (from === target) return;
+    const start = performance.now();
+    const diff = target - from;
+    fromRef.current = target;
+
+    function tick(now) {
+      const elapsed = now - start;
+      const raw = Math.min(elapsed / duration, 1);
+      // ease-out cubic: fast start, slow finish
+      const t = 1 - Math.pow(1 - raw, 3);
+      setDisplay(Math.round(from + diff * t));
+      if (raw < 1) frameRef.current = requestAnimationFrame(tick);
+    }
+    frameRef.current = requestAnimationFrame(tick);
+    return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current); };
+  }, [target, duration]);
+
+  return display;
+}
+
 function Lane({ m, rank }) {
+  const animatedPct = useCountUp(m.pct);
   const tier = tierFor(m.pct);
   const isFirst = rank === 0 && m.pct >= 100;
   const [racing, setRacing] = useState(false);
@@ -42,7 +71,7 @@ function Lane({ m, rank }) {
           animate={{ scale: [1, 1.3, 1] }}
           transition={{ duration: 0.4 }}
         >
-          {tier === 'mvp' ? `🔥 ${m.pct}%` : `${m.pct}%`}
+          {tier === 'mvp' ? `🔥 ${animatedPct}%` : `${animatedPct}%`}
         </motion.div>
         <div className="carwrap">
           <div
