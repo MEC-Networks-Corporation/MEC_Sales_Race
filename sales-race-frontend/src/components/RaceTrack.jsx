@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, LayoutGroup } from 'framer-motion';
 import { adaptSizing, initials, leftFor, tierFor, vehicleSVG, visibleTeam } from '../lib/track';
 
@@ -18,7 +18,6 @@ function useCountUp(target, duration = 900) {
     function tick(now) {
       const elapsed = now - start;
       const raw = Math.min(elapsed / duration, 1);
-      // ease-out cubic: fast start, slow finish
       const t = 1 - Math.pow(1 - raw, 3);
       setDisplay(Math.round(from + diff * t));
       if (raw < 1) frameRef.current = requestAnimationFrame(tick);
@@ -30,8 +29,36 @@ function useCountUp(target, duration = 900) {
   return display;
 }
 
+/** Smoothly interpolate a number (float) with ease-out cubic. */
+function useAnimatedValue(target, duration = 2600) {
+  const [value, setValue] = useState(target);
+  const fromRef = useRef(target);
+  const frameRef = useRef(null);
+
+  useEffect(() => {
+    const from = fromRef.current;
+    if (from === target) return;
+    const start = performance.now();
+    const diff = target - from;
+    fromRef.current = target;
+
+    function tick(now) {
+      const elapsed = now - start;
+      const raw = Math.min(elapsed / duration, 1);
+      const t = 1 - Math.pow(1 - raw, 3); // ease-out cubic
+      setValue(from + diff * t);
+      if (raw < 1) frameRef.current = requestAnimationFrame(tick);
+    }
+    frameRef.current = requestAnimationFrame(tick);
+    return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current); };
+  }, [target, duration]);
+
+  return value;
+}
+
 function Lane({ m, rank }) {
   const animatedPct = useCountUp(m.pct);
+  const animatedLeft = useAnimatedValue(leftFor(m.pct));
   const tier = tierFor(m.pct);
   const isFirst = rank === 0 && m.pct >= 100;
   const [racing, setRacing] = useState(false);
@@ -54,10 +81,9 @@ function Lane({ m, rank }) {
       className="lane"
       transition={{ type: 'spring', stiffness: 260, damping: 28 }}
     >
-      <motion.div
+      <div
         className={`racer ${tier === 'mvp' ? 'mvp' : ''} ${racing ? 'racing' : ''}`}
-        animate={{ left: leftFor(m.pct) + '%' }}
-        transition={{ duration: 2.6, ease: [0.22, 0.61, 0.36, 1] }}
+        style={{ left: animatedLeft + '%' }}
       >
         <div className="speed"><i /><i /><i /></div>
         <div className="puff">{m.pct >= 100 ? '🔥' : '💨'}</div>
@@ -89,7 +115,7 @@ function Lane({ m, rank }) {
             {m.team && <span className="tm">{m.team}</span>}
           </div>
         </div>
-      </motion.div>
+      </div>
     </motion.div>
   );
 }
